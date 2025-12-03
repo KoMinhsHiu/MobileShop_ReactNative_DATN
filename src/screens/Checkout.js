@@ -41,6 +41,7 @@ const Checkout = () => {
   const [loadingCommunes, setLoadingCommunes] = useState(false);
   const [loadingPaymentMethods, setLoadingPaymentMethods] = useState(false);
   const [loadingAddresses, setLoadingAddresses] = useState(false);
+  const [loadingShippingFee, setLoadingShippingFee] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Form data
@@ -95,6 +96,12 @@ const Checkout = () => {
   // Lưu orderCode sau khi tạo đơn hàng thành công
   const [createdOrderCode, setCreatedOrderCode] = useState(null);
 
+  /**
+   * Shipping fee state - null khi chưa chọn địa chỉ
+   */
+  const [shippingFee, setShippingFee] = useState(null);
+  const [shippingFeeError, setShippingFeeError] = useState(null);
+
   // Map payment code to icon
   const getPaymentIcon = (code) => {
     const iconMap = {
@@ -106,7 +113,9 @@ const Checkout = () => {
     return iconMap[code?.toUpperCase()] || 'card';
   };
 
-  // Calculate total price
+  /**
+   * Calculate total price of products
+   */
   const calculateTotal = () => {
     let total = 0;
     basket.forEach((item) => {
@@ -115,6 +124,141 @@ const Checkout = () => {
       total += itemPrice * quantity;
     });
     return total;
+  };
+
+  /**
+   * Get shipping fee from state
+   * Returns 0 if shipping fee hasn't been calculated yet
+   */
+  const getShippingFee = () => {
+    return shippingFee !== null ? shippingFee : 0;
+  };
+
+  /**
+   * Check if shipping fee has been calculated
+   */
+  const hasShippingFee = () => {
+    return shippingFee !== null;
+  };
+
+  /**
+   * Parse shipping fee from API response (format: "34.000 ₫")
+   * Returns number in VND
+   */
+  const parseShippingFee = (feeString) => {
+    if (!feeString) {
+      console.warn('[Checkout] parseShippingFee: Empty input, using default 22000');
+      return 22000; // Default fallback
+    }
+    
+    /**
+     * Remove currency symbol and spaces, then parse
+     * Example: "34.000 ₫" -> 34000
+     */
+    const cleaned = feeString
+      .replace(/₫/g, '')
+      .replace(/\s/g, '')
+      .replace(/\./g, '');
+    
+    const parsed = parseInt(cleaned, 10);
+    
+    if (isNaN(parsed)) {
+      console.warn('[Checkout] parseShippingFee: Failed to parse, using default 22000');
+      return 22000; // Default fallback if parsing fails
+    }
+    
+    return parsed;
+  };
+
+  /**
+   * Calculate shipping fee from API based on province and commune
+   */
+  const calculateShippingFee = async (provinceName, communeName) => {
+    if (!provinceName || !communeName) {
+      console.warn('[Checkout] Missing province or commune name for shipping fee calculation');
+      setShippingFee(null);
+      setLoadingShippingFee(false);
+      return;
+    }
+
+    try {
+      setLoadingShippingFee(true);
+      const apiUrl = getApiUrl(API_ENDPOINTS.SHIPMENT_FEE);
+      
+      /**
+       * Timeout 10 seconds as per API spec
+       */
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const requestBody = {
+        province: provinceName,
+        commune: communeName,
+      };
+      
+      console.log('[Checkout] Calculating shipping fee:', { province: provinceName, commune: communeName });
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+      
+      const result = await response.json();
+      
+      console.log('[Checkout] Shipping fee API response:', {
+        status: result.status,
+        message: result.message,
+        shippingFee: result.data?.shippingFee,
+      });
+
+      if (result.status === 200 && result.data && result.data.shippingFee) {
+        const fee = parseShippingFee(result.data.shippingFee);
+        setShippingFee(fee);
+        setShippingFeeError(null);
+        console.log('[Checkout] ✅ Shipping fee calculated:', fee.toLocaleString('vi-VN'), 'VND');
+      } else {
+        /**
+         * Handle errors - don't set fee, let user know there's an issue
+         */
+        const errorMessage = result.message || 'Không thể tính phí vận chuyển. Vui lòng thử lại.';
+        console.warn('[Checkout] ❌ Failed to calculate shipping fee:', errorMessage);
+        setShippingFee(null);
+        setShippingFeeError(errorMessage);
+      }
+    } catch (error) {
+      console.error('[Checkout] ❌ Error calculating shipping fee:', error.message);
+      
+      /**
+       * Handle timeout or network errors
+       */
+      if (error.name === 'AbortError') {
+        console.warn('[Checkout] Shipping fee calculation timeout (10s exceeded)');
+      }
+      
+      /**
+       * Don't set default fee on error - let user know there's an issue
+       */
+      const errorMessage = error.name === 'AbortError' 
+        ? 'Tính phí vận chuyển đã hết thời gian chờ. Vui lòng thử lại.'
+        : 'Đã xảy ra lỗi khi tính phí vận chuyển. Vui lòng thử lại.';
+      setShippingFee(null);
+      setShippingFeeError(errorMessage);
+    } finally {
+      setLoadingShippingFee(false);
+    }
+  };
+
+  /**
+   * Calculate final amount including shipping fee
+   */
+  const calculateFinalAmount = () => {
+    return calculateTotal() + getShippingFee();
   };
 
   // Fetch customer addresses from API
@@ -157,10 +301,97 @@ const Checkout = () => {
     }
   };
 
-  // Handle address selection
-  const handleAddressSelect = (address) => {
+  /**
+   * Handle address selection and calculate shipping fee
+   */
+  const handleAddressSelect = async (address) => {
+    if (!address) {
+      console.error('[Checkout] ❌ Address is null or undefined!');
+      return;
+    }
+    
     setSelectedAddress(address);
     setShowAddressModal(false);
+    
+    /**
+     * Reset shipping fee và error trước khi tính lại
+     */
+    setShippingFee(null);
+    setShippingFeeError(null);
+    setLoadingShippingFee(false);
+    
+    /**
+     * Try to get provinceId and communeId from various possible field names
+     */
+    const getProvinceId = (addr) => {
+      return addr?.provinceId || 
+             addr?.province?.id || 
+             addr?.cityId ||
+             null;
+    };
+    
+    const getCommuneId = (addr) => {
+      return addr?.communeId || 
+             addr?.commune?.id || 
+             addr?.wardId ||
+             null;
+    };
+    
+    const provinceId = getProvinceId(address);
+    const communeId = getCommuneId(address);
+    
+    /**
+     * Check if we can get province and commune names directly from address object
+     */
+    const provinceNameFromObject = address?.province?.name;
+    const communeNameFromObject = address?.commune?.name;
+    
+    /**
+     * If we have names directly, use them; otherwise fetch by ID
+     */
+    if (provinceNameFromObject && communeNameFromObject) {
+      await calculateShippingFee(provinceNameFromObject, communeNameFromObject);
+    } else if (address && provinceId && communeId) {
+      try {
+        /**
+         * Convert to number if it's a string
+         */
+        const provinceIdNum = typeof provinceId === 'string' ? parseInt(provinceId, 10) : provinceId;
+        const province = await findProvinceById(provinceIdNum);
+        
+        if (province && province.code) {
+          const communeIdNum = typeof communeId === 'string' ? parseInt(communeId, 10) : communeId;
+          const commune = await findCommuneById(communeIdNum, province.code);
+          
+          if (province.name && commune && commune.name) {
+            await calculateShippingFee(province.name, commune.name);
+          } else {
+            console.warn('[Checkout] Could not find province or commune names');
+            setShippingFee(null);
+            setShippingFeeError('Không thể lấy thông tin địa chỉ. Vui lòng thử lại.');
+            setLoadingShippingFee(false);
+          }
+        } else {
+          console.warn('[Checkout] Could not find province or province.code');
+          setShippingFee(null);
+          setShippingFeeError('Không thể tìm thấy tỉnh/thành phố. Vui lòng thử lại.');
+          setLoadingShippingFee(false);
+        }
+      } catch (error) {
+        console.error('[Checkout] Error getting location names for shipping fee:', error.message);
+        setShippingFee(null);
+        setShippingFeeError('Đã xảy ra lỗi khi lấy thông tin địa chỉ. Vui lòng thử lại.');
+        setLoadingShippingFee(false);
+      }
+    } else {
+      console.warn('[Checkout] Address missing provinceId or communeId', {
+        hasProvinceId: !!provinceId,
+        hasCommuneId: !!communeId,
+      });
+      setShippingFee(null);
+      setShippingFeeError('Địa chỉ không đầy đủ thông tin. Vui lòng chọn địa chỉ khác.');
+      setLoadingShippingFee(false);
+    }
   };
 
   // Handle province selection for new address
@@ -682,10 +913,20 @@ const Checkout = () => {
     setShowPaymentModal(false);
   };
 
-  // Validate form
+  /**
+   * Validate form before checkout
+   */
   const validateForm = () => {
     if (!selectedAddress) {
       Alert.alert('Lỗi', 'Vui lòng chọn địa chỉ giao hàng');
+      return false;
+    }
+    if (loadingShippingFee) {
+      Alert.alert('Lỗi', 'Đang tính phí vận chuyển. Vui lòng đợi...');
+      return false;
+    }
+    if (!hasShippingFee()) {
+      Alert.alert('Lỗi', 'Phí vận chuyển chưa được tính. Vui lòng chọn lại địa chỉ giao hàng.');
       return false;
     }
     if (!formData.paymentMethod) {
@@ -772,11 +1013,21 @@ const Checkout = () => {
         return itemData;
       });
 
-      // Calculate shipping fee
-      const shippingFee = 22000;
+      /**
+       * Use shipping fee from state (must be calculated before checkout)
+       */
+      if (!hasShippingFee()) {
+        Alert.alert('Lỗi', 'Phí vận chuyển chưa được tính. Vui lòng chọn lại địa chỉ giao hàng.');
+        setSubmitting(false);
+        return;
+      }
       
-      // Calculate final amount
-      const finalAmount = totalAmount - discountAmount + shippingFee;
+      const currentShippingFee = shippingFee;
+      
+      /**
+       * Calculate final amount
+       */
+      const finalAmount = totalAmount - discountAmount + currentShippingFee;
 
       // Get payment method object from selected payment method
       const selectedPayment = paymentMethods.find(m => m.id === formData.paymentMethod);
@@ -994,7 +1245,7 @@ const Checkout = () => {
       const requestBody = {
         totalAmount: totalAmount, // Required
         discountAmount: discountAmount, // Required
-        shippingFee: shippingFee, // Required
+        shippingFee: currentShippingFee, // Required
         finalAmount: finalAmount, // Required
         recipientName: selectedAddress.recipientName.trim(), // Required - trim whitespace
         recipientPhone: selectedAddress.recipientPhone.trim(), // Required - trim whitespace
@@ -1811,11 +2062,62 @@ const Checkout = () => {
                     </View>
                   </View>
                 ))}
-                <View style={tw`flex-row justify-between items-center pt-4 border-t border-gray-200 mt-2`}>
-                  <Text style={tw`text-lg font-bold text-gray-800`}>Tổng tiền:</Text>
-                  <Text style={tw`text-xl font-bold text-red-600`}>
-                    {calculateTotal().toLocaleString('vi-VN')}đ
-                  </Text>
+                
+                {/* Order Summary */}
+                <View style={tw`pt-4 border-t border-gray-200 mt-2`}>
+                  <View style={tw`flex-row justify-between items-center mb-2`}>
+                    <Text style={tw`text-gray-700`}>Tổng tiền sản phẩm:</Text>
+                    <Text style={tw`text-gray-800 font-medium`}>
+                      {calculateTotal().toLocaleString('vi-VN')}đ
+                    </Text>
+                  </View>
+                  <View style={tw`mb-2`}>
+                    <View style={tw`flex-row justify-between items-center`}>
+                      <Text style={tw`text-gray-700`}>Phí vận chuyển:</Text>
+                      {loadingShippingFee ? (
+                        <View style={tw`flex-row items-center`}>
+                          <ActivityIndicator size="small" color="#2563eb" style={tw`mr-2`} />
+                          <Text style={tw`text-gray-500 text-sm`}>Đang tính...</Text>
+                        </View>
+                      ) : hasShippingFee() ? (
+                        <Text style={tw`text-gray-800 font-medium`}>
+                          {getShippingFee().toLocaleString('vi-VN')}đ
+                        </Text>
+                      ) : shippingFeeError ? (
+                        <View style={tw`flex-1 items-end`}>
+                          <Text style={tw`text-red-600 text-sm`} numberOfLines={2}>
+                            {shippingFeeError}
+                          </Text>
+                          <Pressable
+                            onPress={async () => {
+                              if (selectedAddress && selectedAddress.provinceId && selectedAddress.communeId) {
+                                const province = await findProvinceById(selectedAddress.provinceId);
+                                if (province && province.code) {
+                                  const commune = await findCommuneById(selectedAddress.communeId, province.code);
+                                  if (province.name && commune && commune.name) {
+                                    await calculateShippingFee(province.name, commune.name);
+                                  }
+                                }
+                              }
+                            }}
+                            style={tw`mt-1`}
+                          >
+                            <Text style={tw`text-blue-600 text-xs underline`}>Thử lại</Text>
+                          </Pressable>
+                        </View>
+                      ) : (
+                        <Text style={tw`text-gray-400 text-sm italic`}>
+                          Chưa chọn địa chỉ
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                  <View style={tw`flex-row justify-between items-center pt-2 border-t border-gray-300 mt-2`}>
+                    <Text style={tw`text-lg font-bold text-gray-800`}>Tổng cộng:</Text>
+                    <Text style={tw`text-xl font-bold text-red-600`}>
+                      {calculateFinalAmount().toLocaleString('vi-VN')}đ
+                    </Text>
+                  </View>
                 </View>
               </View>
             </View>
@@ -1943,7 +2245,7 @@ const Checkout = () => {
                 <ActivityIndicator size="small" color="white" />
               ) : (
                 <Text style={tw`text-white text-center font-bold text-lg`}>
-                  Đặt hàng - {calculateTotal().toLocaleString('vi-VN')}đ
+                  Đặt hàng - {calculateFinalAmount().toLocaleString('vi-VN')}đ
                 </Text>
               )}
             </Pressable>

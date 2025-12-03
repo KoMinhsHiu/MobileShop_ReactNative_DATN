@@ -40,6 +40,7 @@ export const API_ENDPOINTS = {
   VNPAY_MOBILE_CREATE: '/api/v1/payments/vnpay/mobile/create',
   VNPAY_MOBILE_CALLBACK: '/api/v1/payments/vnpay/mobile/callback',
   AI_CHAT: '/api/v1/ai/chat',
+  SHIPMENT_FEE: '/api/v1/shipment/fee',
   // Thêm các endpoints khác ở đây
 };
 

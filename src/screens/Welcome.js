@@ -13,9 +13,12 @@ const Welcome = () => {
   const navigation = useNavigation();
 
   useEffect(() => {
-    setTimeout(() => {
-      navigation.replace('HomeScreen');
+    // Đợi 2.5 giây để hiển thị màn hình welcome, sau đó chuyển đến màn hình đăng nhập
+    const timer = setTimeout(() => {
+      navigation.replace('LoginScreen');
     }, 2500);
+    
+    return () => clearTimeout(timer);
   }, [navigation]);
 
   return (

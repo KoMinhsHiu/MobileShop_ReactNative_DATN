@@ -15,11 +15,12 @@ import tw from 'tailwind-react-native-classnames';
 import {TitleText, BodyText} from '../components/ThemeText';
 import {COLORS, SPACING, BORDER_RADIUS, TYPOGRAPHY} from '../constants/theme';
 import {SafeAreaView} from 'react-native-safe-area-context';
-import {saveAuthData, saveUsername, savePassword, getSavedUsername, clearSavedCredentials, getAuthToken, autoLogin} from '../utils/auth';
+import {saveAuthData, saveUsername, getSavedUsername, clearSavedCredentials, getAuthToken} from '../utils/auth';
 import {getApiUrl, API_ENDPOINTS} from '../config/api';
 import {useDispatch} from 'react-redux';
 import {setBasket} from '../store/slices/siteSlice';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import {GoogleSignin, statusCodes} from '@react-native-google-signin/google-signin';
 
 const Login = () => {
   const navigation = useNavigation();
@@ -30,32 +31,27 @@ const Login = () => {
   const [rememberMe, setRememberMe] = useState(false);
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
-  // Load saved username và tự động đăng nhập khi component mount
+  // Cấu hình Google Sign-In
   React.useEffect(() => {
-    const loadSavedUsernameAndAutoLogin = async () => {
+    GoogleSignin.configure({
+      // Web Client ID từ Google Cloud Console
+      webClientId: '504133907493-loka5aeg5o0bmsdd09ppjtqqrj81dh69.apps.googleusercontent.com',
+      offlineAccess: true, // Nếu bạn cần truy cập offline
+    });
+  }, []);
+
+  // Load saved username khi component mount
+  React.useEffect(() => {
+    const loadSavedUsername = async () => {
       const savedUsername = await getSavedUsername();
       if (savedUsername) {
         setUsername(savedUsername);
         setRememberMe(true);
-        
-        // Nếu có remember me, thử tự động đăng nhập
-        const autoLoginResult = await autoLogin();
-        
-        if (autoLoginResult.success && autoLoginResult.token) {
-          // Tự động đăng nhập thành công
-          console.log('Auto login successful from Login screen');
-          
-          // Fetch giỏ hàng
-          await fetchCartFromAPI(autoLoginResult.token);
-          
-          // Chuyển đến Home, bỏ qua màn hình Login
-          navigation.replace('HomeScreen');
-        }
-        // Nếu tự động đăng nhập thất bại, hiển thị form login với username đã điền
       }
     };
-    loadSavedUsernameAndAutoLogin();
+    loadSavedUsername();
   }, []);
 
   // Hàm fetch giỏ hàng từ API
@@ -213,12 +209,11 @@ const Login = () => {
             username: username.trim(),
           };
 
-          // Lưu username và password nếu remember me được chọn
+          // Lưu username nếu remember me được chọn
           if (rememberMe) {
             await saveUsername(username.trim());
-            await savePassword(password); // Lưu password để tự động đăng nhập
           } else {
-            await clearSavedCredentials(); // Xóa cả username và password
+            await clearSavedCredentials(); // Xóa username đã lưu
           }
 
           const saved = await saveAuthData(
@@ -268,6 +263,169 @@ const Login = () => {
       } finally {
         setLoading(false);
       }
+    }
+  };
+
+  // Handler đăng nhập bằng Google - Sử dụng Google Sign-In SDK
+  const handleGoogleLogin = async () => {
+    try {
+      setGoogleLoading(true);
+      setErrors({});
+
+      // Kiểm tra xem Google Play Services có sẵn không (chỉ trên Android)
+      if (Platform.OS === 'android') {
+        await GoogleSignin.hasPlayServices({showPlayServicesUpdateDialog: true});
+      }
+
+      // Đăng nhập với Google
+      console.log('[Google Sign-In] Bắt đầu đăng nhập...');
+      const userInfo = await GoogleSignin.signIn();
+      console.log('[Google Sign-In] Response:', JSON.stringify(userInfo, null, 2));
+      
+      // Response từ Google Sign-In có cấu trúc trực tiếp, không có .data
+      // Kiểm tra idToken trực tiếp từ response
+      if (!userInfo.idToken) {
+        console.error('[Google Sign-In] Không có idToken trong response:', userInfo);
+        setErrors({
+          general: 'Không thể lấy idToken từ Google. Vui lòng kiểm tra:\n1. Android Client ID đã được tạo với đúng SHA-1\n2. Package name khớp: com.shoppingappnew\n3. Web Client ID đã được cấu hình đúng',
+        });
+        setGoogleLoading(false);
+        return;
+      }
+
+      if (!userInfo.user) {
+        console.error('[Google Sign-In] Không có user info trong response:', userInfo);
+        setErrors({general: 'Không thể lấy thông tin user từ Google. Vui lòng thử lại.'});
+        setGoogleLoading(false);
+        return;
+      }
+
+      const {idToken, user} = userInfo;
+      console.log('[Google Sign-In] Thành công! idToken received, length:', idToken.length);
+      console.log('[Google Sign-In] User info:', {email: user?.email, name: user?.name});
+
+      // Gửi idToken lên backend để xác thực
+      // Backend sẽ verify idToken và trả về access token
+      const apiUrl = getApiUrl(API_ENDPOINTS.GOOGLE_MOBILE_CALLBACK);
+      console.log('[Google Sign-In] Calling mobile callback API:', apiUrl);
+      console.log('[Google Sign-In] Request body:', {
+        idToken: idToken.substring(0, 50) + '...',
+      });
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          idToken: idToken, // Chỉ gửi idToken, backend sẽ extract thông tin từ token
+        }),
+      });
+
+      console.log('[Google Sign-In] Response status:', response.status);
+
+      // Parse response
+      let data;
+      const responseText = await response.text();
+      
+      try {
+        data = JSON.parse(responseText);
+        console.log('[Google Sign-In] Response data:', data);
+      } catch (parseError) {
+        console.error('[Google Sign-In] JSON Parse Error:', parseError);
+        console.error('[Google Sign-In] Response text:', responseText.substring(0, 1000));
+        setErrors({
+          general: `Lỗi từ server: Server trả về dữ liệu không hợp lệ. Status: ${response.status}`,
+        });
+        setGoogleLoading(false);
+        return;
+      }
+
+      // Xử lý các trường hợp response
+      if (response.status === 200 && data.status === 200 && data.data) {
+        // Đăng nhập thành công
+        const {userId, tokens} = data.data;
+        const {accessToken, refreshToken, expiresIn} = tokens;
+
+        // Lưu thông tin đăng nhập
+        // Backend đã verify và lấy thông tin từ idToken, nhưng vẫn dùng thông tin từ Google SDK để hiển thị
+        const userData = {
+          userId: userId,
+          username: user.email || user.name || 'Google User',
+          email: user.email,
+          name: user.name,
+          photo: user.photo,
+        };
+
+        const saved = await saveAuthData(
+          accessToken,
+          userData,
+          refreshToken,
+          expiresIn,
+          true // Google login luôn remember
+        );
+
+        if (saved) {
+          // Gọi API lấy giỏ hàng sau khi đăng nhập thành công
+          await fetchCartFromAPI(accessToken);
+          
+          // Chuyển đến màn hình Home sau khi đăng nhập thành công
+          navigation.replace('HomeScreen');
+        } else {
+          setErrors({general: 'Có lỗi xảy ra khi lưu thông tin đăng nhập.'});
+        }
+      } else if (response.status === 401) {
+        // Lỗi xác thực: thiếu hoặc invalid idToken
+        const errorMessage = data.message || 'ID Token không hợp lệ hoặc đã hết hạn. Vui lòng thử lại.';
+        setErrors({general: errorMessage});
+      } else if (response.status === 404 && data.status === 404) {
+        // User chưa tồn tại trong hệ thống - chuyển đến màn hình đăng ký
+        const googleUser = data.data?.googleUser;
+        console.log('[Google Sign-In] User chưa tồn tại, chuyển đến màn hình đăng ký');
+        console.log('[Google Sign-In] Google user info:', googleUser);
+        
+        // Navigate đến Register screen với thông tin Google user
+        // Sử dụng thông tin từ Google SDK (user) nếu backend không trả về googleUser
+        const googleInfo = googleUser || {
+          id: user.id,
+          email: user.email,
+          firstName: user.givenName || user.name?.split(' ')[0] || '',
+          lastName: user.familyName || user.name?.split(' ').slice(1).join(' ') || '',
+        };
+        
+        navigation.navigate('RegisterScreen', {
+          googleUser: googleInfo,
+          fromGoogle: true,
+        });
+      } else if (response.status === 503) {
+        // Service không khả dụng
+        setErrors({
+          general: data.message || 'Dịch vụ xác thực tạm thời không khả dụng. Vui lòng thử lại sau.',
+        });
+      } else {
+        // Các lỗi khác
+        const errorMessage = data.message || data.errors || 'Đăng nhập bằng Google thất bại. Vui lòng thử lại.';
+        setErrors({general: errorMessage});
+      }
+    } catch (error) {
+      console.error('Google Login error:', error);
+      
+      if (error.code === statusCodes.SIGN_IN_CANCELLED) {
+        // User đã hủy đăng nhập
+        console.log('User cancelled Google login');
+        // Không hiển thị lỗi nếu user tự hủy
+      } else if (error.code === statusCodes.IN_PROGRESS) {
+        // Đang xử lý
+        console.log('Google login in progress');
+      } else if (error.code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+        setErrors({general: 'Google Play Services không khả dụng. Vui lòng cài đặt hoặc cập nhật.'});
+      } else {
+        setErrors({
+          general: `Đăng nhập bằng Google thất bại: ${error.message || 'Vui lòng thử lại.'}`,
+        });
+      }
+    } finally {
+      setGoogleLoading(false);
     }
   };
 
@@ -450,10 +608,10 @@ const Login = () => {
             {/* Login Button */}
             <TouchableOpacity
               onPress={handleLogin}
-              disabled={loading}
+              disabled={loading || googleLoading}
               style={[
                 tw`bg-red-600 rounded-lg py-4 items-center justify-center mt-2`,
-                loading && tw`opacity-50`,
+                (loading || googleLoading) && tw`opacity-50`,
                 styles.buttonShadow,
               ]}>
               {loading ? (
@@ -462,6 +620,42 @@ const Login = () => {
                 <TitleText style={tw`text-white text-lg`} weight={700}>
                   Đăng Nhập
                 </TitleText>
+              )}
+            </TouchableOpacity>
+
+            {/* Divider */}
+            <View style={tw`flex-row items-center my-6`}>
+              <View style={tw`flex-1 h-px bg-gray-300`} />
+              <BodyText style={tw`mx-4 text-gray-500`}>hoặc</BodyText>
+              <View style={tw`flex-1 h-px bg-gray-300`} />
+            </View>
+
+            {/* Google Login Button */}
+            <TouchableOpacity
+              onPress={handleGoogleLogin}
+              disabled={loading || googleLoading}
+              style={[
+                tw`bg-white rounded-lg py-4 items-center justify-center flex-row border border-gray-300`,
+                (loading || googleLoading) && tw`opacity-50`,
+                styles.buttonShadow,
+              ]}>
+              {googleLoading ? (
+                <ActivityIndicator size="small" color="#4285F4" />
+              ) : (
+                <>
+                  <View
+                    style={[
+                      tw`w-6 h-6 mr-3 items-center justify-center rounded-full`,
+                      {backgroundColor: '#4285F4'},
+                    ]}>
+                    <TitleText style={tw`text-white text-sm`} weight={700}>
+                      G
+                    </TitleText>
+                  </View>
+                  <TitleText style={tw`text-gray-700 text-lg`} weight={600}>
+                    Đăng nhập bằng Google
+                  </TitleText>
+                </>
               )}
             </TouchableOpacity>
 

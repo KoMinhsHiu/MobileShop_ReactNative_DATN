@@ -19,7 +19,7 @@ import { Icon } from 'react-native-elements';
 import tw from 'tailwind-react-native-classnames';
 import { useSelector } from 'react-redux';
 import { selectBasket } from '../store/slices/siteSlice';
-import { getProvinces, getCommunes } from '../utils/locations';
+import { getProvinces, getCommunes, findProvinceById, findCommuneById } from '../utils/locations';
 import { getAuthToken } from '../utils/auth';
 import { getApiUrl, API_ENDPOINTS } from '../config/api';
 
@@ -40,6 +40,7 @@ const Checkout = () => {
   const [loadingProvinces, setLoadingProvinces] = useState(false);
   const [loadingCommunes, setLoadingCommunes] = useState(false);
   const [loadingPaymentMethods, setLoadingPaymentMethods] = useState(false);
+  const [loadingAddresses, setLoadingAddresses] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   // Form data
@@ -63,9 +64,33 @@ const Checkout = () => {
   const [showProvinceModal, setShowProvinceModal] = useState(false);
   const [showCommuneModal, setShowCommuneModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showAddressModal, setShowAddressModal] = useState(false);
+  const [showAddAddressModal, setShowAddAddressModal] = useState(false);
+  const [isSelectingForNewAddress, setIsSelectingForNewAddress] = useState(false);
 
   // Payment methods from API
   const [paymentMethods, setPaymentMethods] = useState([]);
+
+  // Customer addresses from API
+  const [customerAddresses, setCustomerAddresses] = useState([]);
+  const [selectedAddress, setSelectedAddress] = useState(null);
+
+  // New address form data
+  const [newAddressForm, setNewAddressForm] = useState({
+    recipientName: '',
+    recipientPhone: '',
+    street: '',
+    provinceId: null,
+    communeId: null,
+    postalCode: '',
+    isDefault: false,
+  });
+  const [selectedProvinceForNew, setSelectedProvinceForNew] = useState(null);
+  const [selectedCommuneForNew, setSelectedCommuneForNew] = useState(null);
+  const [communesForNew, setCommunesForNew] = useState([]);
+  const [savingAddress, setSavingAddress] = useState(false);
+  const [editingAddressId, setEditingAddressId] = useState(null);
+  const [deletingAddressId, setDeletingAddressId] = useState(null);
 
   // Lưu orderCode sau khi tạo đơn hàng thành công
   const [createdOrderCode, setCreatedOrderCode] = useState(null);
@@ -92,7 +117,382 @@ const Checkout = () => {
     return total;
   };
 
-  // Fetch customer info to pre-fill form
+  // Fetch customer addresses from API
+  const loadCustomerAddresses = async () => {
+    try {
+      setLoadingAddresses(true);
+      const token = await getAuthToken();
+      if (!token) {
+        setLoadingAddresses(false);
+        return;
+      }
+
+      const apiUrl = getApiUrl(API_ENDPOINTS.GET_CUSTOMER_ADDRESSES);
+      
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.status === 200 && result.data && Array.isArray(result.data)) {
+        // Filter out deleted addresses
+        const activeAddresses = result.data.filter(addr => !addr.isDeleted);
+        setCustomerAddresses(activeAddresses);
+        
+        // Auto-select default address if available
+        const defaultAddress = activeAddresses.find(addr => addr.isDefault);
+        if (defaultAddress) {
+          handleAddressSelect(defaultAddress);
+        }
+      }
+    } catch (error) {
+      console.error('[Checkout] Error loading customer addresses:', error);
+    } finally {
+      setLoadingAddresses(false);
+    }
+  };
+
+  // Handle address selection
+  const handleAddressSelect = (address) => {
+    setSelectedAddress(address);
+    setShowAddressModal(false);
+  };
+
+  // Handle province selection for new address
+  const handleProvinceSelectForNew = async (province) => {
+    setSelectedProvinceForNew(province);
+    setNewAddressForm((prev) => ({
+      ...prev,
+      provinceId: province.id,
+      communeId: null, // Reset commune when province changes
+    }));
+    setSelectedCommuneForNew(null);
+    setCommunesForNew([]);
+    
+    // Load communes for selected province
+    if (province.code) {
+      try {
+        setLoadingCommunes(true);
+        const communesList = await getCommunes(province.code);
+        setCommunesForNew(communesList);
+      } catch (error) {
+        console.error('Error loading communes:', error);
+        Alert.alert('Lỗi', 'Không thể tải danh sách phường/xã');
+      } finally {
+        setLoadingCommunes(false);
+      }
+    }
+  };
+
+  // Handle commune selection for new address
+  const handleCommuneSelectForNew = (commune) => {
+    setSelectedCommuneForNew(commune);
+    setNewAddressForm((prev) => ({
+      ...prev,
+      communeId: commune.id,
+    }));
+  };
+
+  // Validate new address form
+  const validateNewAddressForm = () => {
+    if (!newAddressForm.recipientName.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập họ tên người nhận');
+      return false;
+    }
+    if (!newAddressForm.recipientPhone.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập số điện thoại');
+      return false;
+    }
+    if (!newAddressForm.provinceId) {
+      Alert.alert('Lỗi', 'Vui lòng chọn tỉnh/thành phố');
+      return false;
+    }
+    if (!newAddressForm.communeId) {
+      Alert.alert('Lỗi', 'Vui lòng chọn phường/xã');
+      return false;
+    }
+    if (!newAddressForm.street.trim()) {
+      Alert.alert('Lỗi', 'Vui lòng nhập số nhà/đường');
+      return false;
+    }
+    return true;
+  };
+
+  // Reset address form
+  const resetAddressForm = () => {
+    setNewAddressForm({
+      recipientName: '',
+      recipientPhone: '',
+      street: '',
+      provinceId: null,
+      communeId: null,
+      postalCode: '',
+      isDefault: false,
+    });
+    setSelectedProvinceForNew(null);
+    setSelectedCommuneForNew(null);
+    setCommunesForNew([]);
+    setEditingAddressId(null);
+  };
+
+  // Delete address
+  const handleDeleteAddress = (address) => {
+    Alert.alert(
+      'Xác nhận xóa',
+      `Bạn có chắc chắn muốn xóa địa chỉ "${address.recipientName}"?`,
+      [
+        {
+          text: 'Hủy',
+          style: 'cancel',
+        },
+        {
+          text: 'Xóa',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteAddress(address.id);
+          },
+        },
+      ]
+    );
+  };
+
+  // Delete address API call
+  const deleteAddress = async (addressId) => {
+    setDeletingAddressId(addressId);
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        Alert.alert('Lỗi', 'Vui lòng đăng nhập để xóa địa chỉ');
+        setDeletingAddressId(null);
+        return;
+      }
+
+      const apiUrl = getApiUrl(`${API_ENDPOINTS.DELETE_CUSTOMER_ADDRESS}/${addressId}`);
+      const response = await fetch(apiUrl, {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.status === 200 && result.data && result.data.success === true) {
+        Alert.alert('Thành công', 'Địa chỉ đã được xóa thành công');
+        
+        // If the deleted address was selected, clear selection
+        if (selectedAddress && selectedAddress.id === addressId) {
+          setSelectedAddress(null);
+        }
+        
+        // Reload addresses
+        await loadCustomerAddresses();
+      } else {
+        Alert.alert('Lỗi', result.message || 'Không thể xóa địa chỉ. Vui lòng thử lại.');
+      }
+    } catch (error) {
+      console.error('Error deleting address:', error);
+      Alert.alert('Lỗi', 'Đã xảy ra lỗi khi xóa địa chỉ. Vui lòng thử lại.');
+    } finally {
+      setDeletingAddressId(null);
+    }
+  };
+
+  // Load address data into edit form
+  const loadAddressForEdit = async (address) => {
+    setEditingAddressId(address.id);
+    
+    // Fill form with address data
+    setNewAddressForm({
+      recipientName: address.recipientName || '',
+      recipientPhone: address.recipientPhone || '',
+      street: address.street || '',
+      provinceId: address.provinceId,
+      communeId: address.communeId,
+      postalCode: address.postalCode || '',
+      isDefault: address.isDefault || false,
+    });
+
+    // Load province and commune data
+    if (address.provinceId) {
+      const province = await findProvinceById(address.provinceId);
+      if (province) {
+        setSelectedProvinceForNew(province);
+        // Load communes for this province
+        if (province.code) {
+          try {
+            setLoadingCommunes(true);
+            const communesList = await getCommunes(province.code);
+            setCommunesForNew(communesList);
+            
+            // Find and set selected commune
+            if (address.communeId) {
+              const commune = await findCommuneById(address.communeId, province.code);
+              if (commune) {
+                setSelectedCommuneForNew(commune);
+              }
+            }
+          } catch (error) {
+            console.error('Error loading communes:', error);
+            Alert.alert('Lỗi', 'Không thể tải danh sách phường/xã');
+          } finally {
+            setLoadingCommunes(false);
+          }
+        }
+      }
+    }
+    
+    setShowAddAddressModal(true);
+  };
+
+  // Create or update address
+  const handleSaveAddress = async () => {
+    if (!validateNewAddressForm()) {
+      return;
+    }
+
+    setSavingAddress(true);
+    try {
+      const token = await getAuthToken();
+      if (!token) {
+        Alert.alert('Lỗi', 'Vui lòng đăng nhập để thêm/chỉnh sửa địa chỉ');
+        setSavingAddress(false);
+        return;
+      }
+
+      const requestBody = {
+        recipientName: newAddressForm.recipientName.trim(),
+        recipientPhone: newAddressForm.recipientPhone.trim(),
+        street: newAddressForm.street.trim(),
+        communeId: newAddressForm.communeId,
+        provinceId: newAddressForm.provinceId,
+        isDefault: newAddressForm.isDefault,
+      };
+
+      // Add postalCode if provided
+      if (newAddressForm.postalCode.trim()) {
+        requestBody.postalCode = newAddressForm.postalCode.trim();
+      }
+
+      let apiUrl;
+      let method;
+      
+      if (editingAddressId) {
+        // Update existing address
+        apiUrl = getApiUrl(`${API_ENDPOINTS.UPDATE_CUSTOMER_ADDRESS}/${editingAddressId}`);
+        method = 'PUT';
+      } else {
+        // Create new address
+        apiUrl = getApiUrl(API_ENDPOINTS.CREATE_CUSTOMER_ADDRESS);
+        method = 'POST';
+      }
+
+      const response = await fetch(apiUrl, {
+        method: method,
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      const result = await response.json();
+
+      // Check success for both create and update
+      const isSuccess = editingAddressId 
+        ? (result.status === 200 && result.data && result.data.success === true)
+        : (result.status === 200 && result.data);
+
+      if (isSuccess) {
+        const successMessage = editingAddressId 
+          ? 'Địa chỉ đã được cập nhật thành công'
+          : 'Địa chỉ đã được thêm thành công';
+        Alert.alert('Thành công', successMessage);
+        
+        // Reset form
+        resetAddressForm();
+        setShowAddAddressModal(false);
+        
+        // Reload addresses
+        await loadCustomerAddresses();
+        
+        // If editing and this was the selected address, update selection
+        if (editingAddressId && selectedAddress && selectedAddress.id === editingAddressId) {
+          // Wait a bit for the address to be available
+          setTimeout(async () => {
+            await loadCustomerAddresses();
+            const token = await getAuthToken();
+            if (token) {
+              const apiUrl = getApiUrl(API_ENDPOINTS.GET_CUSTOMER_ADDRESSES);
+              const response = await fetch(apiUrl, {
+                method: 'GET',
+                headers: {
+                  'Authorization': `Bearer ${token}`,
+                  'Content-Type': 'application/json',
+                },
+              });
+              const addressesResult = await response.json();
+              if (addressesResult.status === 200 && addressesResult.data && Array.isArray(addressesResult.data)) {
+                const activeAddresses = addressesResult.data.filter(addr => !addr.isDeleted);
+                const updatedAddress = activeAddresses.find(addr => addr.id === editingAddressId);
+                if (updatedAddress) {
+                  handleAddressSelect(updatedAddress);
+                }
+              }
+            }
+          }, 500);
+        } else if (!editingAddressId) {
+          // If creating new, auto-select it
+          const newAddressId = result.data.addressId;
+          if (newAddressId) {
+            setTimeout(async () => {
+              await loadCustomerAddresses();
+              const token = await getAuthToken();
+              if (token) {
+                const apiUrl = getApiUrl(API_ENDPOINTS.GET_CUSTOMER_ADDRESSES);
+                const response = await fetch(apiUrl, {
+                  method: 'GET',
+                  headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                  },
+                });
+                const addressesResult = await response.json();
+                if (addressesResult.status === 200 && addressesResult.data && Array.isArray(addressesResult.data)) {
+                  const activeAddresses = addressesResult.data.filter(addr => !addr.isDeleted);
+                  const newAddress = activeAddresses.find(addr => addr.id === newAddressId);
+                  if (newAddress) {
+                    handleAddressSelect(newAddress);
+                  }
+                }
+              }
+            }, 500);
+          }
+        }
+      } else {
+        const errorMessage = editingAddressId
+          ? 'Không thể cập nhật địa chỉ. Vui lòng thử lại.'
+          : 'Không thể thêm địa chỉ. Vui lòng thử lại.';
+        Alert.alert('Lỗi', result.message || errorMessage);
+      }
+    } catch (error) {
+      console.error('Error saving address:', error);
+      const errorMessage = editingAddressId
+        ? 'Đã xảy ra lỗi khi cập nhật địa chỉ. Vui lòng thử lại.'
+        : 'Đã xảy ra lỗi khi thêm địa chỉ. Vui lòng thử lại.';
+      Alert.alert('Lỗi', errorMessage);
+    } finally {
+      setSavingAddress(false);
+    }
+  };
+
+  // Fetch customer info to pre-fill form (fallback if no addresses)
   const fetchCustomerInfo = async () => {
     try {
       const token = await getAuthToken();
@@ -116,12 +516,14 @@ const Checkout = () => {
         const customerData = result.data;
         const userData = customerData.user || {};
         
-        // Pre-fill form with customer data
-        setFormData((prev) => ({
-          ...prev,
-          recipientName: `${customerData.firstName || ''} ${customerData.lastName || ''}`.trim(),
-          recipientPhone: userData.phone || '',
-        }));
+        // Only pre-fill if no address is selected
+        if (!selectedAddress) {
+          setFormData((prev) => ({
+            ...prev,
+            recipientName: `${customerData.firstName || ''} ${customerData.lastName || ''}`.trim(),
+            recipientPhone: userData.phone || '',
+          }));
+        }
       }
     } catch (error) {
       console.error('Error fetching customer info:', error);
@@ -135,6 +537,7 @@ const Checkout = () => {
     try {
       setLoadingPaymentMethods(true);
       const apiUrl = getApiUrl(API_ENDPOINTS.GET_PAYMENT_METHODS);
+      
       const response = await fetch(apiUrl, {
         method: 'GET',
         headers: {
@@ -160,13 +563,13 @@ const Checkout = () => {
         
         // Set default payment method to first one if not set
         if (transformedMethods.length > 0) {
+          const defaultMethod = transformedMethods[0].id;
           setFormData((prev) => ({
             ...prev,
-            paymentMethod: prev.paymentMethod || transformedMethods[0].id,
+            paymentMethod: prev.paymentMethod || defaultMethod,
           }));
         }
       } else {
-        console.error('Error loading payment methods:', result.message);
         // Fallback to default methods if API fails
         const fallbackMethods = [
           { id: 'cod', name: 'Thanh toán khi nhận hàng', icon: 'cash', code: 'COD' },
@@ -178,7 +581,7 @@ const Checkout = () => {
         }));
       }
     } catch (error) {
-      console.error('Error loading payment methods:', error);
+      console.error('[Checkout] Error loading payment methods:', error);
       // Fallback to default methods if API fails
       const fallbackMethods = [
         { id: 'cod', name: 'Thanh toán khi nhận hàng', icon: 'cash', code: 'COD' },
@@ -227,31 +630,47 @@ const Checkout = () => {
   };
 
   // Handle province selection
-  const handleProvinceSelect = (province) => {
-    setSelectedProvince(province);
-    setFormData((prev) => ({
-      ...prev,
-      provinceId: province.id,
-      communeId: null, // Reset commune when province changes
-    }));
-    setSelectedCommune(null);
-    setCommunes([]);
-    setShowProvinceModal(false);
-    
-    // Load communes for selected province
-    if (province.code) {
-      loadCommunes(province.code);
+  const handleProvinceSelect = async (province) => {
+    if (isSelectingForNewAddress) {
+      // Handle for new address form
+      await handleProvinceSelectForNew(province);
+      setShowProvinceModal(false);
+      setIsSelectingForNewAddress(false);
+    } else {
+      // Handle for main form
+      setSelectedProvince(province);
+      setFormData((prev) => ({
+        ...prev,
+        provinceId: province.id,
+        communeId: null, // Reset commune when province changes
+      }));
+      setSelectedCommune(null);
+      setCommunes([]);
+      setShowProvinceModal(false);
+      
+      // Load communes for selected province
+      if (province.code) {
+        await loadCommunes(province.code);
+      }
     }
   };
 
   // Handle commune selection
   const handleCommuneSelect = (commune) => {
-    setSelectedCommune(commune);
-    setFormData((prev) => ({
-      ...prev,
-      communeId: commune.id,
-    }));
-    setShowCommuneModal(false);
+    if (isSelectingForNewAddress) {
+      // Handle for new address form
+      handleCommuneSelectForNew(commune);
+      setShowCommuneModal(false);
+      setIsSelectingForNewAddress(false);
+    } else {
+      // Handle for main form
+      setSelectedCommune(commune);
+      setFormData((prev) => ({
+        ...prev,
+        communeId: commune.id,
+      }));
+      setShowCommuneModal(false);
+    }
   };
 
   // Handle payment method selection
@@ -265,24 +684,8 @@ const Checkout = () => {
 
   // Validate form
   const validateForm = () => {
-    if (!formData.recipientName.trim()) {
-      Alert.alert('Lỗi', 'Vui lòng nhập họ tên người nhận');
-      return false;
-    }
-    if (!formData.recipientPhone.trim()) {
-      Alert.alert('Lỗi', 'Vui lòng nhập số điện thoại');
-      return false;
-    }
-    if (!formData.provinceId) {
-      Alert.alert('Lỗi', 'Vui lòng chọn tỉnh/thành phố');
-      return false;
-    }
-    if (!formData.communeId) {
-      Alert.alert('Lỗi', 'Vui lòng chọn phường/xã');
-      return false;
-    }
-    if (!formData.street.trim()) {
-      Alert.alert('Lỗi', 'Vui lòng nhập số nhà/đường');
+    if (!selectedAddress) {
+      Alert.alert('Lỗi', 'Vui lòng chọn địa chỉ giao hàng');
       return false;
     }
     if (!formData.paymentMethod) {
@@ -312,245 +715,762 @@ const Checkout = () => {
         return;
       }
 
-      // DEBUG: Log basket data
-      console.log('=== DEBUG CHECKOUT ===');
-      console.log('[Checkout] Source:', source);
-      console.log('[Checkout] Is from cart:', isFromCart);
-      console.log('Basket length:', basket?.length || 0);
-      console.log('Basket is array:', Array.isArray(basket));
-      console.log('Basket data (full):', JSON.stringify(basket, null, 2));
+      // Calculate order values
+      // Theo mẫu:
+      // - totalAmount = tổng (price * quantity) của tất cả items (giá gốc)
+      // - discountAmount = tổng ((price - discount) * quantity) của tất cả items (số tiền giảm)
+      // - finalAmount = totalAmount - discountAmount + shippingFee
+      let totalAmount = 0; // Tổng giá gốc (tổng price * quantity)
+      let discountAmount = 0; // Tổng số tiền giảm giá (tổng (price - discount) * quantity)
       
-      // DEBUG: Log each item in basket with colorId check
-      if (basket && Array.isArray(basket)) {
-        basket.forEach((item, index) => {
-          console.log(`Checkout Basket Item ${index + 1}:`, {
-            id: item.id,
-            cartItemId: item.product?.cartItemId,
-            variantId: item.product?.variantId,
-            colorId: item.product?.colorId,
-            productId: item.product?.id,
-            title: item.product?.title,
-            price: item.product?.price,
-            originalPrice: item.product?.originalPrice,
-            amount: item.product?.amount,
-            colorIdValue: item.product?.colorId,
-            colorIdType: typeof item.product?.colorId,
-            hasColorId: item.product?.colorId !== null && item.product?.colorId !== undefined,
-            fullProduct: JSON.stringify(item.product, null, 2),
-          });
-        });
+      // Validate items - phải có ít nhất 1 item
+      if (basket.length === 0) {
+        Alert.alert('Lỗi', 'Giỏ hàng trống');
+        setSubmitting(false);
+        return;
       }
 
-      // Calculate order values
-      let totalAmount = 0; // Tổng giá gốc
-      let discountAmount = 0; // Tổng số tiền giảm giá
-      
-      // Prepare items array
-      const items = basket.map((item) => {
+      // Prepare items array theo OrderItemCreateDto schema
+      const items = basket.map((item, index) => {
+        // price = giá gốc (originalPrice hoặc price)
         const originalPrice = item.product.originalPrice || item.product.price || 0;
+        // discount = giá sau giảm (price hiện tại)
         const discountPrice = item.product.price || 0;
         const quantity = item.product.amount || 1;
+        
+        // Tính toán cho item này
+        // itemTotal = price * quantity (giá gốc * số lượng)
         const itemTotal = originalPrice * quantity;
+        // itemDiscount = (price - discount) * quantity (số tiền giảm * số lượng)
         const itemDiscount = (originalPrice - discountPrice) * quantity;
         
         totalAmount += itemTotal;
         discountAmount += itemDiscount;
         
-        const itemData = {
-          variantId: item.product.variantId || item.product.id,
-          colorId: item.product.colorId || null, // Có thể null nếu không có
-          quantity: quantity,
-          price: originalPrice,
-          discount: discountPrice,
-        };
+        // Validate required fields
+        const variantId = item.product.variantId || item.product.id;
+        if (!variantId) {
+          console.error(`[Checkout] Item ${index + 1} missing variantId`);
+          Alert.alert('Lỗi', `Sản phẩm "${item.product.title}" thiếu variantId. Vui lòng thử lại.`);
+          setSubmitting(false);
+          return;
+        }
         
-        // DEBUG: Log each item
-        console.log('Item processed:', {
-          productId: item.product.id,
-          variantId: itemData.variantId,
-          colorId: itemData.colorId,
-          originalPrice,
-          discountPrice,
-          quantity,
-          itemTotal,
-          itemDiscount,
-        });
+        // colorId là required theo spec mới
+        const colorId = item.product.colorId !== null && item.product.colorId !== undefined 
+          ? item.product.colorId 
+          : 0; // Default value nếu không có colorId
+        
+        const itemData = {
+          variantId: variantId,
+          colorId: colorId, // Required field
+          quantity: quantity,
+          price: originalPrice, // Giá gốc
+          discount: discountPrice, // Giá sau giảm
+        };
         
         return itemData;
       });
 
-      // Calculate shipping fee (có thể lấy từ API hoặc tính toán, tạm thời để 0 hoặc giá cố định)
-      const shippingFee = 34000; // Có thể tính toán dựa trên địa chỉ
+      // Calculate shipping fee
+      const shippingFee = 22000;
       
       // Calculate final amount
       const finalAmount = totalAmount - discountAmount + shippingFee;
 
-      // DEBUG: Log calculated values
-      console.log('Calculated values:', {
-        totalAmount,
-        discountAmount,
-        shippingFee,
-        finalAmount,
-      });
-
       // Get payment method object from selected payment method
       const selectedPayment = paymentMethods.find(m => m.id === formData.paymentMethod);
       
-      // Prepare payment method object (required format: {id, code, name})
-      let paymentMethodObj = null;
-      if (selectedPayment) {
-        paymentMethodObj = {
-          id: selectedPayment.apiId, // Real ID from API
-          code: selectedPayment.code,
-          name: selectedPayment.name,
-        };
+      if (!selectedPayment) {
+        console.error('[Checkout] No payment method found');
+        Alert.alert('Lỗi', 'Vui lòng chọn phương thức thanh toán');
+        setSubmitting(false);
+        return;
       }
-
-      // Prepare request body
-      const requestBody = {
-        totalAmount: totalAmount,
-        discountAmount: discountAmount,
-        shippingFee: shippingFee,
-        finalAmount: finalAmount,
-        recipientName: formData.recipientName.trim(),
-        recipientPhone: formData.recipientPhone.trim(),
-        street: formData.street.trim(),
-        communeId: formData.communeId,
-        provinceId: formData.provinceId,
-        items: items,
+      
+      // Prepare payment method object theo PaymentMethodDto schema
+      const paymentMethodObj = {
+        ...(selectedPayment.apiId && { id: selectedPayment.apiId }),
+        code: selectedPayment.code,
+        name: selectedPayment.name,
       };
 
-      // Add payment method if available (required field)
-      if (paymentMethodObj) {
-        requestBody.paymentMethod = paymentMethodObj;
+      // Validate address fields before creating request
+      
+      // Helper function to convert to number if needed
+      const toNumber = (value) => {
+        if (value === null || value === undefined) return null;
+        if (typeof value === 'number') return value;
+        if (typeof value === 'string') {
+          const num = parseInt(value, 10);
+          return isNaN(num) ? null : num;
+        }
+        return null;
+      };
+      
+      // Try to get communeId and provinceId from various possible field names
+      // API có thể trả về với tên field khác nhau
+      const getCommuneId = (address) => {
+        return address?.communeId || 
+               address?.commune?.id || 
+               address?.communeId || 
+               address?.wardId ||
+               null;
+      };
+      
+      const getProvinceId = (address) => {
+        return address?.provinceId || 
+               address?.province?.id || 
+               address?.provinceId || 
+               address?.cityId ||
+               null;
+      };
+      
+      // Get communeId and provinceId với fallback
+      const communeIdRaw = getCommuneId(selectedAddress);
+      const provinceIdRaw = getProvinceId(selectedAddress);
+      
+      console.log('[Checkout] Extracting IDs with fallback:');
+      console.log('[Checkout]   communeId sources:', {
+        'communeId': selectedAddress?.communeId,
+        'commune.id': selectedAddress?.commune?.id,
+        'wardId': selectedAddress?.wardId,
+        'final': communeIdRaw,
+      });
+      console.log('[Checkout]   provinceId sources:', {
+        'provinceId': selectedAddress?.provinceId,
+        'province.id': selectedAddress?.province?.id,
+        'cityId': selectedAddress?.cityId,
+        'final': provinceIdRaw,
+      });
+      
+      // Convert communeId and provinceId to numbers if they are strings
+      const communeIdNum = toNumber(communeIdRaw);
+      const provinceIdNum = toNumber(provinceIdRaw);
+      
+      
+      const addressValidation = {
+        recipientName: {
+          value: selectedAddress?.recipientName,
+          originalValue: selectedAddress?.recipientName,
+          type: typeof selectedAddress?.recipientName,
+          isValid: !!selectedAddress?.recipientName && 
+                   typeof selectedAddress.recipientName === 'string' && 
+                   selectedAddress.recipientName.trim().length > 0,
+          required: true,
+          error: !selectedAddress?.recipientName 
+            ? 'Missing recipientName' 
+            : typeof selectedAddress.recipientName !== 'string'
+            ? 'recipientName is not a string'
+            : selectedAddress.recipientName.trim().length === 0
+            ? 'recipientName is empty'
+            : null,
+        },
+        recipientPhone: {
+          value: selectedAddress?.recipientPhone,
+          originalValue: selectedAddress?.recipientPhone,
+          type: typeof selectedAddress?.recipientPhone,
+          isValid: !!selectedAddress?.recipientPhone && 
+                   typeof selectedAddress.recipientPhone === 'string' && 
+                   selectedAddress.recipientPhone.trim().length > 0,
+          required: true,
+          error: !selectedAddress?.recipientPhone 
+            ? 'Missing recipientPhone' 
+            : typeof selectedAddress.recipientPhone !== 'string'
+            ? 'recipientPhone is not a string'
+            : selectedAddress.recipientPhone.trim().length === 0
+            ? 'recipientPhone is empty'
+            : null,
+        },
+        street: {
+          value: selectedAddress?.street,
+          originalValue: selectedAddress?.street,
+          type: typeof selectedAddress?.street,
+          isValid: !!selectedAddress?.street && 
+                   typeof selectedAddress.street === 'string' && 
+                   selectedAddress.street.trim().length > 0,
+          required: true,
+          error: !selectedAddress?.street 
+            ? 'Missing street' 
+            : typeof selectedAddress.street !== 'string'
+            ? 'street is not a string'
+            : selectedAddress.street.trim().length === 0
+            ? 'street is empty'
+            : null,
+        },
+        communeId: {
+          value: communeIdNum,
+          originalValue: communeIdRaw,
+          originalType: typeof communeIdRaw,
+          allSources: {
+            'communeId': selectedAddress?.communeId,
+            'commune.id': selectedAddress?.commune?.id,
+            'wardId': selectedAddress?.wardId,
+          },
+          isValid: communeIdNum !== null && communeIdNum > 0,
+          required: true,
+          error: communeIdNum === null 
+            ? 'Missing or invalid communeId (checked: communeId, commune.id, wardId)' 
+            : communeIdNum <= 0
+            ? 'communeId must be greater than 0'
+            : null,
+        },
+        provinceId: {
+          value: provinceIdNum,
+          originalValue: provinceIdRaw,
+          originalType: typeof provinceIdRaw,
+          allSources: {
+            'provinceId': selectedAddress?.provinceId,
+            'province.id': selectedAddress?.province?.id,
+            'cityId': selectedAddress?.cityId,
+          },
+          isValid: provinceIdNum !== null && provinceIdNum > 0,
+          required: true,
+          error: provinceIdNum === null 
+            ? 'Missing or invalid provinceId (checked: provinceId, province.id, cityId)' 
+            : provinceIdNum <= 0
+            ? 'provinceId must be greater than 0'
+            : null,
+        },
+        postalCode: {
+          value: selectedAddress?.postalCode,
+          originalValue: selectedAddress?.postalCode,
+          type: typeof selectedAddress?.postalCode,
+          isValid: true, // Optional field
+          required: false,
+          defaultValue: '700000',
+        },
+      };
+      
+      console.log('[Checkout] Address validation results:', JSON.stringify(addressValidation, null, 2));
+      
+      // Check if all required fields are valid
+      const allRequiredValid = Object.values(addressValidation)
+        .filter(field => field.required)
+        .every(field => field.isValid);
+      
+      if (!allRequiredValid) {
+        console.log('[Checkout] ❌ Address validation failed!');
+        const invalidFields = Object.entries(addressValidation)
+          .filter(([key, field]) => field.required && !field.isValid)
+          .map(([key, field]) => ({
+            field: key,
+            value: field.originalValue,
+            type: field.originalType || field.type,
+            error: field.error,
+          }));
+        
+        console.log('[Checkout] Invalid required fields details:', JSON.stringify(invalidFields, null, 2));
+        
+        // Create detailed error message (sửa typo: communeld -> communeId, provinceld -> provinceId)
+        const fieldNameMap = {
+          'communeId': 'communeId',
+          'provinceId': 'provinceId',
+        };
+        
+        const errorMessages = invalidFields.map(f => {
+          const fieldName = fieldNameMap[f.field] || f.field;
+          return `- ${fieldName}: ${f.error || 'Invalid'} (value: ${f.value}, type: ${f.type})`;
+        }).join('\n');
+        
+        const errorMessage = `Thông tin địa chỉ giao hàng không hợp lệ:\n\n${errorMessages}\n\nVui lòng kiểm tra lại địa chỉ hoặc chọn địa chỉ khác.`;
+        
+        console.log('[Checkout] Error message:', errorMessage);
+        console.log('[Checkout] Full address object for debugging:', JSON.stringify(selectedAddress, null, 2));
+        Alert.alert('Lỗi', errorMessage);
+        setSubmitting(false);
+        return;
       }
+      console.log('[Checkout] ✅ All required address fields are valid');
+      
+      // Note: Sử dụng communeIdNum và provinceIdNum đã convert trong request body
+      console.log('[Checkout] Using converted IDs in request:');
+      console.log('[Checkout]   communeId:', communeIdNum, '(original was:', selectedAddress?.communeId, ')');
+      console.log('[Checkout]   provinceId:', provinceIdNum, '(original was:', selectedAddress?.provinceId, ')');
+
+      // Prepare request body theo OrderCreateDto schema
+      console.log('[Checkout] ========== PREPARING REQUEST BODY ==========');
+      // Sử dụng converted IDs (communeIdNum, provinceIdNum) và trim text fields
+      const requestBody = {
+        totalAmount: totalAmount, // Required
+        discountAmount: discountAmount, // Required
+        shippingFee: shippingFee, // Required
+        finalAmount: finalAmount, // Required
+        recipientName: selectedAddress.recipientName.trim(), // Required - trim whitespace
+        recipientPhone: selectedAddress.recipientPhone.trim(), // Required - trim whitespace
+        street: selectedAddress.street.trim(), // Required - trim whitespace
+        communeId: communeIdNum, // Required - use converted number
+        provinceId: provinceIdNum, // Required - use converted number
+        items: items, // Required, min 1 item
+        paymentMethod: paymentMethodObj, // Required
+      };
+      
+      console.log('[Checkout] Request body address fields:');
+      console.log('[Checkout]   recipientName:', requestBody.recipientName);
+      console.log('[Checkout]   recipientPhone:', requestBody.recipientPhone);
+      console.log('[Checkout]   street:', requestBody.street);
+      console.log('[Checkout]   communeId:', requestBody.communeId, '(type:', typeof requestBody.communeId, ')');
+      console.log('[Checkout]   provinceId:', requestBody.provinceId, '(type:', typeof requestBody.provinceId, ')');
 
       // Add optional fields if available
-      if (formData.postalCode) {
-        requestBody.postalCode = formData.postalCode.trim();
-      }
+      // postalCode: default "700000" nếu không có
+      const postalCode = selectedAddress.postalCode || '700000';
+      requestBody.postalCode = postalCode;
+      console.log('[Checkout] Postal code (with default):', postalCode);
+      
+      // voucherIdsApplied: optional array
       if (formData.voucherIdsApplied && Array.isArray(formData.voucherIdsApplied) && formData.voucherIdsApplied.length > 0) {
         requestBody.voucherIdsApplied = formData.voucherIdsApplied;
+        console.log('[Checkout] Vouchers applied:', formData.voucherIdsApplied);
+      } else {
+        console.log('[Checkout] No vouchers applied');
       }
-      if (formData.pointUsed) {
+      
+      // pointUsed: optional, min 0
+      if (formData.pointUsed && formData.pointUsed > 0) {
         requestBody.pointUsed = formData.pointUsed;
+        console.log('[Checkout] Points used:', formData.pointUsed);
+      } else {
+        console.log('[Checkout] No points used');
       }
+      
+      // DEBUG: Log shipping information that will be sent
+      console.log('[Checkout] ========== SHIPPING INFORMATION TO SEND ==========');
+      console.log('[Checkout] Recipient Name:', requestBody.recipientName);
+      console.log('[Checkout] Recipient Phone:', requestBody.recipientPhone);
+      console.log('[Checkout] Street Address:', requestBody.street);
+      console.log('[Checkout] Commune ID:', requestBody.communeId);
+      console.log('[Checkout] Province ID:', requestBody.provinceId);
+      console.log('[Checkout] Postal Code:', requestBody.postalCode);
+      console.log('[Checkout] Shipping Fee:', requestBody.shippingFee);
+      
+      // DEBUG: Log order summary
+      console.log('[Checkout] ========== ORDER SUMMARY ==========');
+      console.log('[Checkout] Total Amount:', requestBody.totalAmount);
+      console.log('[Checkout] Discount Amount:', requestBody.discountAmount);
+      console.log('[Checkout] Shipping Fee:', requestBody.shippingFee);
+      console.log('[Checkout] Final Amount:', requestBody.finalAmount);
+      console.log('[Checkout] Number of Items:', requestBody.items.length);
+      console.log('[Checkout] Payment Method:', JSON.stringify(requestBody.paymentMethod, null, 2));
 
       // DEBUG: Log form data
-      console.log('Form data:', JSON.stringify(formData, null, 2));
+      console.log('[Checkout] ========== REQUEST BODY PREPARED ==========');
+      console.log('[Checkout] Form data:', JSON.stringify(formData, null, 2));
+      console.log('[Checkout] Full request body:', JSON.stringify(requestBody, null, 2));
+      console.log('[Checkout] Request body (compact):', JSON.stringify(requestBody));
+      console.log('[Checkout] Request body size:', JSON.stringify(requestBody).length, 'bytes');
 
-      // DEBUG: Log full request body
-      console.log('Request Body:', JSON.stringify(requestBody, null, 2));
-      console.log('Request Body (compact):', JSON.stringify(requestBody));
+      // Get API URL using getApiUrl helper
+      const apiUrl = getApiUrl(API_ENDPOINTS.CREATE_ORDER);
 
-      // API Base URL
-      const API_BASE_URL = Platform.OS === 'android' 
-        ? 'http://10.0.2.2:3000'
-        : 'http://localhost:3000';
+      // Prepare request headers
+      const requestHeaders = {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      };
 
-      console.log('API URL:', `${API_BASE_URL}/api/v1/orders/create`);
-      console.log('Request Method: POST');
-      console.log('Request Headers:', {
+      // Prepare request body as JSON string
+      const requestBodyString = JSON.stringify(requestBody);
+
+      // DEBUG: Log complete request details
+      console.log('[Checkout] ========== API REQUEST DETAILS ==========');
+      console.log('[Checkout] Endpoint:', API_ENDPOINTS.CREATE_ORDER);
+      console.log('[Checkout] Full API URL:', apiUrl);
+      console.log('[Checkout] Request Method: POST');
+      console.log('[Checkout] Request Headers:', JSON.stringify({
         'Authorization': `Bearer ${token ? token.substring(0, 20) + '...' : 'NO TOKEN'}`,
         'Content-Type': 'application/json',
+      }, null, 2));
+      console.log('[Checkout] Token present:', !!token);
+      console.log('[Checkout] Token length:', token ? token.length : 0);
+      console.log('[Checkout] Timeout: 30 seconds');
+      console.log('[Checkout] Request body string length:', requestBodyString.length, 'bytes');
+      
+      // DEBUG: Log request body structure
+      console.log('[Checkout] ========== REQUEST BODY STRUCTURE ==========');
+      console.log('[Checkout] Request body keys:', Object.keys(requestBody));
+      console.log('[Checkout] Request body has totalAmount:', 'totalAmount' in requestBody);
+      console.log('[Checkout] Request body has discountAmount:', 'discountAmount' in requestBody);
+      console.log('[Checkout] Request body has shippingFee:', 'shippingFee' in requestBody);
+      console.log('[Checkout] Request body has finalAmount:', 'finalAmount' in requestBody);
+      console.log('[Checkout] Request body has recipientName:', 'recipientName' in requestBody);
+      console.log('[Checkout] Request body has recipientPhone:', 'recipientPhone' in requestBody);
+      console.log('[Checkout] Request body has street:', 'street' in requestBody);
+      console.log('[Checkout] Request body has communeId:', 'communeId' in requestBody);
+      console.log('[Checkout] Request body has provinceId:', 'provinceId' in requestBody);
+      console.log('[Checkout] Request body has postalCode:', 'postalCode' in requestBody);
+      console.log('[Checkout] Request body has items:', 'items' in requestBody);
+      console.log('[Checkout] Request body has paymentMethod:', 'paymentMethod' in requestBody);
+      console.log('[Checkout] Request body has voucherIdsApplied:', 'voucherIdsApplied' in requestBody);
+      console.log('[Checkout] Request body has pointUsed:', 'pointUsed' in requestBody);
+      
+      // DEBUG: Log request body by sections
+      console.log('[Checkout] ========== REQUEST BODY BREAKDOWN ==========');
+      console.log('[Checkout] --- Order Amounts ---');
+      console.log('[Checkout] totalAmount:', requestBody.totalAmount, '(type:', typeof requestBody.totalAmount, ')');
+      console.log('[Checkout] discountAmount:', requestBody.discountAmount, '(type:', typeof requestBody.discountAmount, ')');
+      console.log('[Checkout] shippingFee:', requestBody.shippingFee, '(type:', typeof requestBody.shippingFee, ')');
+      console.log('[Checkout] finalAmount:', requestBody.finalAmount, '(type:', typeof requestBody.finalAmount, ')');
+      
+      console.log('[Checkout] --- Shipping Address ---');
+      console.log('[Checkout] recipientName:', requestBody.recipientName, '(type:', typeof requestBody.recipientName, ', length:', requestBody.recipientName?.length, ')');
+      console.log('[Checkout] recipientPhone:', requestBody.recipientPhone, '(type:', typeof requestBody.recipientPhone, ', length:', requestBody.recipientPhone?.length, ')');
+      console.log('[Checkout] street:', requestBody.street, '(type:', typeof requestBody.street, ', length:', requestBody.street?.length, ')');
+      console.log('[Checkout] communeId:', requestBody.communeId, '(type:', typeof requestBody.communeId, ')');
+      console.log('[Checkout] provinceId:', requestBody.provinceId, '(type:', typeof requestBody.provinceId, ')');
+      console.log('[Checkout] postalCode:', requestBody.postalCode, '(type:', typeof requestBody.postalCode, ')');
+      
+      console.log('[Checkout] --- Items ---');
+      console.log('[Checkout] items count:', requestBody.items.length);
+      requestBody.items.forEach((item, index) => {
+        console.log(`[Checkout] Item ${index + 1}:`, {
+          variantId: item.variantId,
+          colorId: item.colorId,
+          quantity: item.quantity,
+          price: item.price,
+          discount: item.discount,
+        });
+      });
+      
+      console.log('[Checkout] --- Payment Method ---');
+      console.log('[Checkout] paymentMethod:', JSON.stringify(requestBody.paymentMethod, null, 2));
+      
+      if (requestBody.voucherIdsApplied) {
+        console.log('[Checkout] --- Vouchers ---');
+        console.log('[Checkout] voucherIdsApplied:', JSON.stringify(requestBody.voucherIdsApplied, null, 2));
+      }
+      
+      if (requestBody.pointUsed) {
+        console.log('[Checkout] --- Points ---');
+        console.log('[Checkout] pointUsed:', requestBody.pointUsed, '(type:', typeof requestBody.pointUsed, ')');
+      }
+      
+      // DEBUG: Log final request body (formatted)
+      console.log('[Checkout] ========== FINAL REQUEST BODY (JSON) ==========');
+      console.log('[Checkout] Request body (formatted):', JSON.stringify(requestBody, null, 2));
+      console.log('[Checkout] Request body (compact):', requestBodyString);
+      
+      // DEBUG: Log example request body format for comparison (theo mẫu chuẩn)
+      console.log('[Checkout] ========== EXAMPLE REQUEST FORMAT (MẪU CHUẨN) ==========');
+      const exampleRequest = {
+        totalAmount: 44000000,
+        discountAmount: 8800000,
+        shippingFee: 22000,
+        finalAmount: 35222000,
+        recipientName: "Nguyễn Văn A",
+        recipientPhone: "0987654321",
+        street: "123 Đường Nguyễn Huệ",
+        communeId: 2677,
+        provinceId: 28,
+        postalCode: "700000",
+        items: [
+          {
+            variantId: 1,
+            colorId: 1,
+            quantity: 1,
+            price: 44000000,
+            discount: 35200000
+          }
+        ],
+        paymentMethod: {
+          id: 1,
+          code: "VNPAY",
+          name: "VNPay"
+        }
+      };
+      console.log('[Checkout] Example request format (mẫu chuẩn):', JSON.stringify(exampleRequest, null, 2));
+      console.log('[Checkout] --- Structure Comparison ---');
+      
+      // So sánh structure (chỉ so sánh required fields, không so sánh optional)
+      const requiredFields = ['totalAmount', 'discountAmount', 'shippingFee', 'finalAmount', 
+                              'recipientName', 'recipientPhone', 'street', 'communeId', 
+                              'provinceId', 'postalCode', 'items', 'paymentMethod'];
+      const actualRequiredFields = requiredFields.filter(field => field in requestBody);
+      const exampleRequiredFields = requiredFields.filter(field => field in exampleRequest);
+      
+      console.log('[Checkout] Required fields in actual request:', actualRequiredFields);
+      console.log('[Checkout] Required fields in example:', exampleRequiredFields);
+      console.log('[Checkout] All required fields present:', 
+        requiredFields.every(field => field in requestBody));
+      
+      // Kiểm tra optional fields - chỉ nên có nếu có giá trị
+      const optionalFields = ['voucherIdsApplied', 'pointUsed'];
+      const actualOptionalFields = optionalFields.filter(field => field in requestBody);
+      console.log('[Checkout] Optional fields in actual request:', actualOptionalFields);
+      console.log('[Checkout] Optional fields should only be present if they have values');
+      
+      // DEBUG: Compare actual request with example format (theo mẫu chuẩn)
+      console.log('[Checkout] ========== REQUEST FORMAT COMPARISON ==========');
+      const comparison = {
+        totalAmount: {
+          example: 'number (44000000)',
+          actual: `${typeof requestBody.totalAmount} (${requestBody.totalAmount})`,
+          match: typeof requestBody.totalAmount === 'number'
+        },
+        discountAmount: {
+          example: 'number (8800000)',
+          actual: `${typeof requestBody.discountAmount} (${requestBody.discountAmount})`,
+          match: typeof requestBody.discountAmount === 'number'
+        },
+        shippingFee: {
+          example: 'number (22000)',
+          actual: `${typeof requestBody.shippingFee} (${requestBody.shippingFee})`,
+          match: typeof requestBody.shippingFee === 'number'
+        },
+        finalAmount: {
+          example: 'number (35222000)',
+          actual: `${typeof requestBody.finalAmount} (${requestBody.finalAmount})`,
+          match: typeof requestBody.finalAmount === 'number'
+        },
+        recipientName: {
+          example: 'string ("Nguyễn Văn A")',
+          actual: `${typeof requestBody.recipientName} ("${requestBody.recipientName}")`,
+          match: typeof requestBody.recipientName === 'string'
+        },
+        recipientPhone: {
+          example: 'string ("0987654321")',
+          actual: `${typeof requestBody.recipientPhone} ("${requestBody.recipientPhone}")`,
+          match: typeof requestBody.recipientPhone === 'string'
+        },
+        street: {
+          example: 'string ("123 Đường Nguyễn Huệ")',
+          actual: `${typeof requestBody.street} ("${requestBody.street}")`,
+          match: typeof requestBody.street === 'string'
+        },
+        communeId: {
+          example: 'number (2677)',
+          actual: `${typeof requestBody.communeId} (${requestBody.communeId})`,
+          match: typeof requestBody.communeId === 'number'
+        },
+        provinceId: {
+          example: 'number (28)',
+          actual: `${typeof requestBody.provinceId} (${requestBody.provinceId})`,
+          match: typeof requestBody.provinceId === 'number'
+        },
+        postalCode: {
+          example: 'string ("700000")',
+          actual: `${typeof requestBody.postalCode} ("${requestBody.postalCode}")`,
+          match: typeof requestBody.postalCode === 'string'
+        },
+        items: {
+          example: 'array with variantId, colorId, quantity, price, discount',
+          actual: `array with ${requestBody.items.length} item(s)`,
+          match: Array.isArray(requestBody.items) && requestBody.items.length > 0
+        },
+        paymentMethod: {
+          example: 'object with id, code, name',
+          actual: `object with keys: ${Object.keys(requestBody.paymentMethod).join(', ')}`,
+          match: typeof requestBody.paymentMethod === 'object' && 
+                 'code' in requestBody.paymentMethod && 
+                 'name' in requestBody.paymentMethod
+        }
+      };
+      
+      // Optional fields - chỉ log nếu có trong request
+      if ('voucherIdsApplied' in requestBody) {
+        comparison.voucherIdsApplied = {
+          example: 'optional - only if has value',
+          actual: `array ${JSON.stringify(requestBody.voucherIdsApplied)}`,
+          match: Array.isArray(requestBody.voucherIdsApplied) && requestBody.voucherIdsApplied.length > 0
+        };
+      }
+      
+      if ('pointUsed' in requestBody) {
+        comparison.pointUsed = {
+          example: 'optional - only if has value',
+          actual: `${typeof requestBody.pointUsed} (${requestBody.pointUsed})`,
+          match: typeof requestBody.pointUsed === 'number' && requestBody.pointUsed > 0
+        };
+      }
+      
+      console.log('[Checkout] Format comparison:', JSON.stringify(comparison, null, 2));
+      
+      const allFormatsMatch = Object.values(comparison).every(item => item.match === true);
+      console.log('[Checkout] All formats match example:', allFormatsMatch);
+      
+      // Kiểm tra request body có đúng format như mẫu không
+      const hasOnlyRequiredFields = !('voucherIdsApplied' in requestBody) && !('pointUsed' in requestBody);
+      const hasOptionalFieldsOnlyIfNeeded = 
+        (!('voucherIdsApplied' in requestBody) || 
+         (Array.isArray(requestBody.voucherIdsApplied) && requestBody.voucherIdsApplied.length > 0)) &&
+        (!('pointUsed' in requestBody) || 
+         (typeof requestBody.pointUsed === 'number' && requestBody.pointUsed > 0));
+      
+      console.log('[Checkout] Request has only required fields (no optional):', hasOnlyRequiredFields);
+      console.log('[Checkout] Optional fields only present if they have values:', hasOptionalFieldsOnlyIfNeeded);
+      
+      if (!allFormatsMatch) {
+        const mismatchedFields = Object.entries(comparison)
+          .filter(([key, item]) => !item.match)
+          .map(([key]) => key);
+        console.log('[Checkout] ⚠️ Fields with format mismatch:', mismatchedFields);
+      } else {
+        console.log('[Checkout] ✅ Request format matches example perfectly!');
+      }
+      
+      // Final validation - đảm bảo request body đúng như mẫu
+      console.log('[Checkout] ========== FINAL REQUEST BODY VALIDATION ==========');
+      const finalValidation = {
+        hasAllRequiredFields: requiredFields.every(field => field in requestBody),
+        hasCorrectTypes: {
+          totalAmount: typeof requestBody.totalAmount === 'number',
+          discountAmount: typeof requestBody.discountAmount === 'number',
+          shippingFee: typeof requestBody.shippingFee === 'number',
+          finalAmount: typeof requestBody.finalAmount === 'number',
+          recipientName: typeof requestBody.recipientName === 'string',
+          recipientPhone: typeof requestBody.recipientPhone === 'string',
+          street: typeof requestBody.street === 'string',
+          communeId: typeof requestBody.communeId === 'number',
+          provinceId: typeof requestBody.provinceId === 'number',
+          postalCode: typeof requestBody.postalCode === 'string',
+          items: Array.isArray(requestBody.items),
+          paymentMethod: typeof requestBody.paymentMethod === 'object',
+        },
+        itemsStructure: requestBody.items.every(item => 
+          typeof item.variantId === 'number' &&
+          typeof item.colorId === 'number' &&
+          typeof item.quantity === 'number' &&
+          typeof item.price === 'number' &&
+          typeof item.discount === 'number'
+        ),
+        paymentMethodStructure: 
+          typeof requestBody.paymentMethod.code === 'string' &&
+          typeof requestBody.paymentMethod.name === 'string' &&
+          (requestBody.paymentMethod.id === undefined || typeof requestBody.paymentMethod.id === 'number'),
+        noUnnecessaryFields: Object.keys(requestBody).every(key => 
+          requiredFields.includes(key) || 
+          (key === 'voucherIdsApplied' && Array.isArray(requestBody.voucherIdsApplied) && requestBody.voucherIdsApplied.length > 0) ||
+          (key === 'pointUsed' && typeof requestBody.pointUsed === 'number' && requestBody.pointUsed > 0)
+        )
+      };
+      
+      console.log('[Checkout] Final validation results:', JSON.stringify(finalValidation, null, 2));
+      
+      const allValid = 
+        finalValidation.hasAllRequiredFields &&
+        Object.values(finalValidation.hasCorrectTypes).every(v => v === true) &&
+        finalValidation.itemsStructure &&
+        finalValidation.paymentMethodStructure &&
+        finalValidation.noUnnecessaryFields;
+      
+      if (allValid) {
+        console.log('[Checkout] ✅ Request body is valid and matches the example format!');
+      } else {
+        console.log('[Checkout] ❌ Request body validation failed!');
+        const issues = [];
+        if (!finalValidation.hasAllRequiredFields) issues.push('Missing required fields');
+        if (!Object.values(finalValidation.hasCorrectTypes).every(v => v)) issues.push('Incorrect field types');
+        if (!finalValidation.itemsStructure) issues.push('Invalid items structure');
+        if (!finalValidation.paymentMethodStructure) issues.push('Invalid paymentMethod structure');
+        if (!finalValidation.noUnnecessaryFields) issues.push('Has unnecessary fields');
+        console.log('[Checkout] Issues found:', issues);
+      }
+      
+      // Validate request body structure
+      console.log('[Checkout] ========== REQUEST BODY VALIDATION ==========');
+      const requestValidationResults = {
+        hasRequiredFields: {
+          totalAmount: typeof requestBody.totalAmount === 'number',
+          discountAmount: typeof requestBody.discountAmount === 'number',
+          shippingFee: typeof requestBody.shippingFee === 'number',
+          finalAmount: typeof requestBody.finalAmount === 'number',
+          recipientName: typeof requestBody.recipientName === 'string' && requestBody.recipientName.length > 0,
+          recipientPhone: typeof requestBody.recipientPhone === 'string' && requestBody.recipientPhone.length > 0,
+          street: typeof requestBody.street === 'string' && requestBody.street.length > 0,
+          communeId: typeof requestBody.communeId === 'number' && requestBody.communeId > 0,
+          provinceId: typeof requestBody.provinceId === 'number' && requestBody.provinceId > 0,
+          items: Array.isArray(requestBody.items) && requestBody.items.length > 0,
+          paymentMethod: typeof requestBody.paymentMethod === 'object' && requestBody.paymentMethod !== null,
+        },
+        hasOptionalFields: {
+          postalCode: 'postalCode' in requestBody,
+          voucherIdsApplied: 'voucherIdsApplied' in requestBody,
+          pointUsed: 'pointUsed' in requestBody,
+        },
+      };
+      
+      const allRequestFieldsValid = Object.values(requestValidationResults.hasRequiredFields).every(v => v === true);
+      console.log('[Checkout] Request validation results:', JSON.stringify(requestValidationResults, null, 2));
+      console.log('[Checkout] All required request fields valid:', allRequestFieldsValid);
+      
+      if (!allRequestFieldsValid) {
+        const invalidRequestFields = Object.entries(requestValidationResults.hasRequiredFields)
+          .filter(([key, valid]) => !valid)
+          .map(([key]) => key);
+        console.log('[Checkout] ❌ Invalid required request fields:', invalidRequestFields);
+        Alert.alert('Lỗi', 'Request body không hợp lệ. Vui lòng thử lại.');
+        setSubmitting(false);
+        return;
+      }
+      console.log('[Checkout] ✅ Request body validation passed');
+
+      // DEBUG: Log request in curl format for testing
+      console.log('[Checkout] ========== REQUEST IN CURL FORMAT ==========');
+      console.log('[Checkout] curl -X POST "' + apiUrl + '" \\');
+      console.log('[Checkout]   -H "Authorization: Bearer ' + (token ? token.substring(0, 20) + '...' : 'YOUR_TOKEN') + '" \\');
+      console.log('[Checkout]   -H "Content-Type: application/json" \\');
+      console.log('[Checkout]   -d \'' + requestBodyString + '\'');
+      
+      // DEBUG: Log request in readable format
+      console.log('[Checkout] ========== REQUEST READABLE FORMAT ==========');
+      console.log('[Checkout] POST ' + apiUrl);
+      console.log('[Checkout] Headers:');
+      console.log('[Checkout]   Authorization: Bearer ' + (token ? token.substring(0, 20) + '...' : 'NO_TOKEN'));
+      console.log('[Checkout]   Content-Type: application/json');
+      console.log('[Checkout] Body:');
+      console.log(JSON.stringify(requestBody, null, 2));
+
+      // Call API với timeout 30 giây (theo spec)
+      console.log('[Checkout] ========== SENDING API REQUEST ==========');
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 seconds timeout
+      
+      console.log('[Checkout] Starting fetch request...');
+      console.log('[Checkout] Request timestamp:', new Date().toISOString());
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: requestHeaders,
+        body: requestBodyString,
+        signal: controller.signal,
       });
 
-      // Call API
-      const response = await fetch(`${API_BASE_URL}/api/v1/orders/create`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(requestBody),
-      });
+      clearTimeout(timeoutId);
+      console.log('[Checkout] Request completed at:', new Date().toISOString());
 
       // DEBUG: Log response status
-      console.log('Response status:', response.status);
-      console.log('Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
+      console.log('[Checkout] ========== API RESPONSE ==========');
+      console.log('[Checkout] Response status:', response.status);
+      console.log('[Checkout] Response status text:', response.statusText);
+      console.log('[Checkout] Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
+      console.log('[Checkout] Response OK:', response.ok);
 
       const result = await response.json();
 
       // DEBUG: Log API response
-      console.log('API Response:', JSON.stringify(result, null, 2));
-      console.log('=== END DEBUG CHECKOUT ===');
+      console.log('[Checkout] Full API response:', JSON.stringify(result, null, 2));
+      console.log('[Checkout] Response status code:', result.status);
+      console.log('[Checkout] Response message:', result.message);
+      console.log('[Checkout] Response data:', JSON.stringify(result.data, null, 2));
+      console.log('[Checkout] Response errors:', JSON.stringify(result.errors, null, 2));
 
+      // Xử lý response theo spec mới
       if (result.status === 200 && result.data) {
-        // Lấy orderCode/orderId từ response - thử nhiều cách để tương thích với các cấu trúc response khác nhau
-        const orderData = result.data;
-        let orderCode = orderData.orderCode 
-          || orderData.order?.orderCode 
-          || orderData.orderId // API trả về orderId
-          || orderData.id 
-          || (orderData.order && orderData.order.id)
-          || orderData.data?.orderCode
-          || orderData.data?.id
-          || orderData.data?.orderId
-          || null;
+        // Response format: { status: 200, message: "Order created successfully", data: { orderId: 1 } }
+        const orderId = result.data.orderId;
         
-        // Debug log để kiểm tra orderCode
         console.log('[Checkout] ========== ORDER CREATED ==========');
         console.log('[Checkout] Full response:', JSON.stringify(result, null, 2));
-        console.log('[Checkout] Order data:', JSON.stringify(orderData, null, 2));
-        console.log('[Checkout] All possible orderCode values:', {
-          'orderData.orderCode': orderData.orderCode,
-          'orderData.orderId': orderData.orderId, // Thêm orderId
-          'orderData.order?.orderCode': orderData.order?.orderCode,
-          'orderData.id': orderData.id,
-          'orderData.order?.id': orderData.order?.id,
-          'orderData.data?.orderCode': orderData.data?.orderCode,
-          'orderData.data?.id': orderData.data?.id,
-          'orderData.data?.orderId': orderData.data?.orderId,
-        });
-        console.log('[Checkout] Extracted orderCode:', orderCode);
+        console.log('[Checkout] Order ID:', orderId);
         
-        // Nếu vẫn không có orderCode, thử lấy từ đơn hàng mới nhất
-        if (!orderCode) {
-          console.log('[Checkout] No orderCode found, fetching latest order...');
-          try {
-            const token = await getAuthToken();
-            if (token) {
-              const API_BASE_URL = Platform.OS === 'android' 
-                ? 'http://10.0.2.2:3000'
-                : 'http://localhost:3000';
-              
-              // Đợi một chút để đảm bảo đơn hàng đã được lưu vào database
-              await new Promise(resolve => setTimeout(resolve, 500));
-              
-              // Lấy danh sách đơn hàng và lấy đơn mới nhất (sửa endpoint thành /me)
-              const ordersResponse = await fetch(`${API_BASE_URL}/api/v1/orders/me`, {
-                method: 'GET',
-                headers: {
-                  'Authorization': `Bearer ${token}`,
-                  'Content-Type': 'application/json',
-                },
-              });
-              
-              const ordersResult = await ordersResponse.json();
-              console.log('[Checkout] Orders list response:', JSON.stringify(ordersResult, null, 2));
-              
-              if (ordersResult.status === 200 && ordersResult.data && ordersResult.data.length > 0) {
-                // Lấy đơn hàng đầu tiên (mới nhất, thường được sắp xếp theo ngày đặt mới nhất)
-                const latestOrder = ordersResult.data[0];
-                orderCode = latestOrder.orderCode || latestOrder.orderId || latestOrder.id;
-                console.log('[Checkout] Got orderCode from latest order:', orderCode);
-                console.log('[Checkout] Latest order:', JSON.stringify(latestOrder, null, 2));
-              } else {
-                console.log('[Checkout] No orders found in list');
-              }
-            }
-          } catch (error) {
-            console.error('[Checkout] Error getting latest order:', error);
-          }
+        // Lưu orderId vào state để dùng sau
+        if (orderId) {
+          setCreatedOrderCode(orderId);
+          console.log('[Checkout] Saved orderId to state:', orderId);
         }
         
-        console.log('[Checkout] Final orderCode before alert:', orderCode);
-        
-        // Lưu orderCode vào state để dùng sau
-        if (orderCode) {
-          setCreatedOrderCode(orderCode);
-          console.log('[Checkout] Saved orderCode to state:', orderCode);
-        }
+        // Lưu orderId vào biến để dùng trong alert buttons
+        const savedOrderId = orderId;
         
         // Nếu đặt hàng từ giỏ hàng, xóa các sản phẩm đã chọn khỏi giỏ hàng
         if (isFromCart && basket.length > 0) {
@@ -596,82 +1516,158 @@ const Checkout = () => {
           }
         }
         
-        // Success - Hiển thị thông báo với 2 nút: "Quay lại" và "Xem đơn hàng"
-        // Luôn hiển thị cả 2 nút, nếu không có orderCode thì dùng fallback
-        const alertButtons = [
-            {
-            text: 'Quay lại',
-            style: 'cancel',
-              onPress: () => {
-                // Navigate to HomeScreen and then to Orders tab
-                navigation.navigate('HomeScreen', {
-                  screen: 'Orders'
-                });
+        // Kiểm tra nếu payment method là VNPay, tạo payment URL và mở
+        const currentPaymentMethod = paymentMethods.find(m => m.id === formData.paymentMethod);
+        // Check case-insensitive để đảm bảo nhận diện đúng VNPay
+        const isVNPay = currentPaymentMethod && (
+          currentPaymentMethod.code?.toUpperCase() === 'VNPAY' || 
+          currentPaymentMethod.id?.toLowerCase() === 'vnpay'
+        );
+        
+        // Nếu là VNPay, xử lý thanh toán và return (không hiển thị alert "Thành công")
+        if (isVNPay && orderId) {
+          console.log('[Checkout] ========== CREATING VNPAY PAYMENT URL ==========');
+          console.log('[Checkout] Order ID:', orderId);
+          console.log('[Checkout] Payment method: VNPAY');
+          
+          try {
+            const token = await getAuthToken();
+            if (!token) {
+              console.error('[Checkout] ❌ No auth token for VNPay payment');
+              Alert.alert('Lỗi', 'Không thể tạo URL thanh toán. Vui lòng thử lại.');
+              setSubmitting(false);
+              return;
+            }
+            
+            const vnpayApiUrl = getApiUrl(API_ENDPOINTS.VNPAY_MOBILE_CREATE);
+            
+            // Timeout 10 giây theo spec
+            const vnpayController = new AbortController();
+            const vnpayTimeoutId = setTimeout(() => vnpayController.abort(), 10000);
+            
+            const vnpayResponse = await fetch(vnpayApiUrl, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
               },
-            },
-          {
-            text: 'Xem đơn hàng',
-            onPress: async () => {
-              console.log('[Checkout] Button "Xem đơn hàng" pressed');
-              console.log('[Checkout] orderCode from closure:', orderCode);
-              console.log('[Checkout] createdOrderCode from state:', createdOrderCode);
+              body: JSON.stringify({
+                orderId: orderId,
+              }),
+              signal: vnpayController.signal,
+            });
+            
+            clearTimeout(vnpayTimeoutId);
+            
+            const vnpayResult = await vnpayResponse.json();
+            
+            // Kiểm tra cả statusCode và status (một số API dùng status thay vì statusCode)
+            const statusCode = vnpayResult.statusCode || vnpayResult.status;
+            const isSuccess = statusCode === 200 && vnpayResponse.ok;
+            
+            // Log chi tiết để debug lỗi VNPay
+            if (!isSuccess || !vnpayResult.data?.paymentUrl) {
+              console.error('[Checkout] VNPay API Error:', {
+                httpStatus: vnpayResponse.status,
+                statusCode: statusCode,
+                message: vnpayResult.message,
+                data: vnpayResult.data,
+                errors: vnpayResult.errors,
+              });
+            }
+            
+            if (isSuccess && vnpayResult.data && vnpayResult.data.paymentUrl) {
+              const paymentUrl = vnpayResult.data.paymentUrl;
+              console.log('[Checkout] ✅ VNPay payment URL created successfully');
               
-              // Ưu tiên dùng orderCode từ state, sau đó từ closure
-              let finalOrderCode = createdOrderCode || orderCode;
-              
-              // Nếu không có orderCode, thử lấy từ đơn hàng mới nhất
-              if (!finalOrderCode) {
-                console.log('[Checkout] orderCode is null/undefined, fetching latest order...');
-                try {
-                  const token = await getAuthToken();
-                  if (token) {
-                    const API_BASE_URL = Platform.OS === 'android' 
-                      ? 'http://10.0.2.2:3000'
-                      : 'http://localhost:3000';
-                    
-                    // Đợi một chút để đảm bảo đơn hàng đã được lưu
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                    
-                    const ordersResponse = await fetch(`${API_BASE_URL}/api/v1/orders/me`, {
-                      method: 'GET',
-                      headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json',
-                      },
-                    });
-                    
-                    const ordersResult = await ordersResponse.json();
-                    console.log('[Checkout] Orders list in button press:', JSON.stringify(ordersResult, null, 2));
-                    
-                    if (ordersResult.status === 200 && ordersResult.data && ordersResult.data.length > 0) {
-                      const latestOrder = ordersResult.data[0];
-                      finalOrderCode = latestOrder.orderCode || latestOrder.orderId || latestOrder.id;
-                      console.log('[Checkout] Found orderCode in button press:', finalOrderCode);
-                    } else {
-                      console.log('[Checkout] No orders found in button press');
-                    }
-                  }
-                } catch (error) {
-                  console.error('[Checkout] Error getting orderCode in button press:', error);
-                }
+              // Kiểm tra URL có hợp lệ không
+              if (!paymentUrl || (!paymentUrl.startsWith('http://') && !paymentUrl.startsWith('https://'))) {
+                console.error('[Checkout] ❌ Invalid payment URL format');
+                Alert.alert('Lỗi', 'URL thanh toán không hợp lệ. Vui lòng thử lại.');
+                setSubmitting(false);
+                return;
               }
               
-              console.log('[Checkout] Final orderCode for navigation:', finalOrderCode);
+              // Navigate đến WebView screen để thanh toán
+              // KHÔNG hiển thị alert "Thành công" vì chưa thanh toán
+              setSubmitting(false);
+              navigation.navigate('VNPayPaymentScreen', {
+                paymentUrl: paymentUrl,
+                orderId: orderId,
+              });
+              // Return ngay để không chạy tiếp phần hiển thị alert "Thành công"
+              return;
+            } else {
+              // Xử lý lỗi từ API
+              let errorMessage = 'Không thể tạo URL thanh toán. Vui lòng thử lại.';
               
-              if (finalOrderCode) {
-                // Navigate to OrderDetailScreen với orderCode hoặc orderId
-                console.log('[Checkout] Navigating to OrderDetailScreen with orderCode/orderId:', finalOrderCode);
-                // Nếu finalOrderCode là number, truyền như orderId, nếu là string thì như orderCode
-                const isNumber = typeof finalOrderCode === 'number' || !isNaN(finalOrderCode);
-                if (isNumber) {
-                  navigation.navigate('OrderDetailScreen', { orderId: finalOrderCode });
-                } else {
-                  navigation.navigate('OrderDetailScreen', { orderCode: finalOrderCode });
+              // Kiểm tra HTTP status code
+              if (vnpayResponse.status === 503 || statusCode === 503) {
+                errorMessage = vnpayResult.message || 'Dịch vụ thanh toán tạm thời không khả dụng. Vui lòng thử lại sau.';
+              } else if (vnpayResponse.status === 400 || statusCode === 400) {
+                errorMessage = vnpayResult.message || 'Không thể tạo URL thanh toán.';
+                if (vnpayResult.errors) {
+                  const errorDetails = Object.values(vnpayResult.errors)
+                    .flat()
+                    .map(e => typeof e === 'string' ? e : e.message || e)
+                    .join('\n');
+                  if (errorDetails) {
+                    errorMessage += '\n\n' + errorDetails;
+                  }
                 }
+              } else if (vnpayResponse.status === 404 || statusCode === 404) {
+                errorMessage = vnpayResult.message || 'Không tìm thấy đơn hàng hoặc thông tin khách hàng.';
+              } else if (vnpayResponse.status === 403 || statusCode === 403) {
+                errorMessage = vnpayResult.message || 'Bạn không có quyền thanh toán đơn hàng này.';
+              } else if (vnpayResult.message) {
+                errorMessage = vnpayResult.message;
+              } else if (!vnpayResult.data || !vnpayResult.data.paymentUrl) {
+                errorMessage = 'Không nhận được payment URL từ server. Vui lòng thử lại.';
+              }
+              
+              console.error('[Checkout] ❌ VNPay payment URL creation failed:', errorMessage);
+              Alert.alert('Lỗi', errorMessage);
+              setSubmitting(false);
+              return;
+            }
+          } catch (error) {
+            console.error('[Checkout] ========== VNPAY PAYMENT ERROR ==========');
+            console.error('[Checkout] Error name:', error.name);
+            console.error('[Checkout] Error message:', error.message);
+            
+            if (error.name === 'AbortError') {
+              console.log('[Checkout] ❌ VNPay request timeout (10s exceeded)');
+              Alert.alert('Lỗi', 'Yêu cầu tạo URL thanh toán đã hết thời gian chờ. Vui lòng thử lại.');
+            } else {
+              console.log('[Checkout] ❌ Unexpected error during VNPay payment');
+              Alert.alert('Lỗi', 'Đã xảy ra lỗi khi tạo URL thanh toán. Vui lòng thử lại.');
+            }
+            setSubmitting(false);
+            return;
+          }
+        }
+        
+        // Success - Chỉ hiển thị thông báo cho payment methods KHÔNG phải VNPay (như COD)
+        // VNPay đã được xử lý ở trên và đã return, nên code chỉ chạy đến đây nếu KHÔNG phải VNPay
+        if (!isVNPay) {
+          const alertButtons = [
+          {
+            text: 'Quay lại',
+            style: 'cancel',
+            onPress: () => {
+              navigation.navigate('HomeScreen', {
+                screen: 'Orders'
+              });
+            },
+          },
+          {
+            text: 'Xem đơn hàng',
+            onPress: () => {
+              const orderIdToUse = savedOrderId || createdOrderCode;
+              
+              if (orderIdToUse) {
+                navigation.navigate('OrderDetailScreen', { orderId: orderIdToUse });
               } else {
-                // Nếu vẫn không có orderCode, chuyển đến danh sách đơn hàng
-                console.log('[Checkout] No orderCode found, navigating to Orders list');
-                Alert.alert('Thông báo', 'Vui lòng xem đơn hàng trong danh sách đơn hàng.');
                 navigation.navigate('HomeScreen', {
                   screen: 'Orders'
                 });
@@ -680,42 +1676,71 @@ const Checkout = () => {
           },
         ];
 
-        Alert.alert(
-          'Thành công', 
-          'Đơn hàng đã được đặt thành công!', 
-          alertButtons
-        );
+          Alert.alert(
+            'Thành công', 
+            'Đơn hàng đã được đặt thành công!', 
+            alertButtons
+          );
+        }
+        setSubmitting(false);
       } else {
-        // Handle errors
+        // Handle errors theo spec
         let errorMessage = 'Đã xảy ra lỗi khi đặt hàng. Vui lòng thử lại.';
         
         if (result.status === 400) {
+          // 400 Bad Request: Sản phẩm hết hàng, voucher không hợp lệ, giá trị đơn hàng tối thiểu không đạt
           errorMessage = result.message || 'Một hoặc nhiều sản phẩm đã hết hàng.';
         } else if (result.status === 503) {
-          errorMessage = 'Dịch vụ đặt hàng tạm thời không khả dụng. Vui lòng thử lại sau.';
+          // 503 Service Unavailable: Order service không khả dụng
+          errorMessage = result.message || 'Dịch vụ đặt hàng tạm thời không khả dụng. Vui lòng thử lại sau.';
+        } else if (result.status === 404) {
+          // 404 Not Found: Customer không tồn tại, Point configuration không tồn tại
+          errorMessage = result.message || 'Không tìm thấy thông tin khách hàng.';
         } else if (result.message) {
           errorMessage = result.message;
+        }
+        
+        // Hiển thị chi tiết lỗi nếu có
+        if (result.errors && Array.isArray(result.errors) && result.errors.length > 0) {
+          const errorDetails = result.errors.map(e => e.message).join('\n');
+          errorMessage += '\n\n' + errorDetails;
         }
         
         Alert.alert('Lỗi', errorMessage);
       }
     } catch (error) {
-      console.error('Error during checkout:', error);
-      Alert.alert('Lỗi', 'Đã xảy ra lỗi khi đặt hàng. Vui lòng thử lại.');
+      console.error('[Checkout] ========== CHECKOUT ERROR ==========');
+      console.error('[Checkout] Error name:', error.name);
+      console.error('[Checkout] Error message:', error.message);
+      console.error('[Checkout] Error stack:', error.stack);
+      console.error('[Checkout] Full error:', JSON.stringify(error, null, 2));
+      
+      // Xử lý timeout error
+      if (error.name === 'AbortError') {
+        console.log('[Checkout] ❌ Request timeout (30s exceeded)');
+        Alert.alert('Lỗi', 'Yêu cầu đặt hàng đã hết thời gian chờ. Vui lòng thử lại.');
+      } else {
+        console.log('[Checkout] ❌ Unexpected error during checkout');
+        Alert.alert('Lỗi', 'Đã xảy ra lỗi khi đặt hàng. Vui lòng thử lại.');
+      }
     } finally {
       setSubmitting(false);
+      console.log('[Checkout] ========== CHECKOUT PROCESS ENDED ==========');
     }
   };
 
   useEffect(() => {
     const initialize = async () => {
       await Promise.all([
-        fetchCustomerInfo(),
         loadProvinces(),
         loadPaymentMethods(),
+        loadCustomerAddresses(),
       ]);
+      // Fetch customer info after addresses (as fallback)
+      await fetchCustomerInfo();
     };
     initialize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading) {
@@ -801,68 +1826,56 @@ const Checkout = () => {
                 <Text style={tw`text-lg font-bold text-gray-800`}>Thông tin giao hàng</Text>
               </View>
               <View style={tw`p-4`}>
-                {/* Recipient Name */}
+                {/* Address Selection */}
                 <View style={tw`mb-4`}>
-                  <Text style={tw`text-gray-700 font-medium mb-2`}>Họ tên người nhận *</Text>
-                  <TextInput
-                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
-                    value={formData.recipientName}
-                    onChangeText={(text) => setFormData((prev) => ({ ...prev, recipientName: text }))}
-                    placeholder="Nhập họ tên người nhận"
-                  />
-                </View>
-
-                {/* Phone Number */}
-                <View style={tw`mb-4`}>
-                  <Text style={tw`text-gray-700 font-medium mb-2`}>Số điện thoại *</Text>
-                  <TextInput
-                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
-                    value={formData.recipientPhone}
-                    onChangeText={(text) => setFormData((prev) => ({ ...prev, recipientPhone: text }))}
-                    placeholder="Nhập số điện thoại"
-                    keyboardType="phone-pad"
-                  />
-                </View>
-
-                {/* Province */}
-                <View style={tw`mb-4`}>
-                  <Text style={tw`text-gray-700 font-medium mb-2`}>Tỉnh/Thành phố *</Text>
-                  <Pressable
-                    style={tw`border border-gray-300 rounded-lg p-3 flex-row justify-between items-center`}
-                    onPress={() => setShowProvinceModal(true)}
-                  >
-                    <Text style={tw`text-gray-800 ${selectedProvince ? '' : 'text-gray-400'}`}>
-                      {selectedProvince ? selectedProvince.name : 'Chọn tỉnh/thành phố'}
-                    </Text>
-                    <Icon name="chevron-down" type="ionicon" size={20} color="#666" />
-                  </Pressable>
-                </View>
-
-                {/* Commune */}
-                <View style={tw`mb-4`}>
-                  <Text style={tw`text-gray-700 font-medium mb-2`}>Phường/Xã *</Text>
-                  <Pressable
-                    style={tw`border border-gray-300 rounded-lg p-3 flex-row justify-between items-center ${!selectedProvince ? 'opacity-50' : ''}`}
-                    onPress={() => selectedProvince && setShowCommuneModal(true)}
-                    disabled={!selectedProvince}
-                  >
-                    <Text style={tw`text-gray-800 ${selectedCommune ? '' : 'text-gray-400'}`}>
-                      {selectedCommune ? selectedCommune.name : 'Chọn phường/xã'}
-                    </Text>
-                    <Icon name="chevron-down" type="ionicon" size={20} color="#666" />
-                  </Pressable>
-                </View>
-
-                {/* Street Address */}
-                <View style={tw`mb-4`}>
-                  <Text style={tw`text-gray-700 font-medium mb-2`}>Số nhà/Đường *</Text>
-                  <TextInput
-                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
-                    value={formData.street}
-                    onChangeText={(text) => setFormData((prev) => ({ ...prev, street: text }))}
-                    placeholder="Nhập số nhà, tên đường"
-                    multiline
-                  />
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Chọn địa chỉ giao hàng *</Text>
+                  {loadingAddresses ? (
+                    <View style={tw`border border-gray-300 rounded-lg p-3 flex-row items-center justify-center`}>
+                      <ActivityIndicator size="small" color="#2563eb" />
+                      <Text style={tw`text-gray-600 ml-2`}>Đang tải địa chỉ...</Text>
+                    </View>
+                  ) : customerAddresses.length === 0 ? (
+                    <View style={tw`border border-red-300 rounded-lg p-3 bg-red-50`}>
+                      <Text style={tw`text-red-600 text-center mb-3`}>
+                        Bạn chưa có địa chỉ nào.
+                      </Text>
+                      <Pressable
+                        style={tw`bg-blue-600 rounded-lg px-4 py-2`}
+                        onPress={() => {
+                          resetAddressForm();
+                          setShowAddAddressModal(true);
+                        }}
+                      >
+                        <Text style={tw`text-white font-bold text-center`}>Thêm địa chỉ mới</Text>
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable
+                      style={tw`border border-gray-300 rounded-lg p-3 flex-row justify-between items-center ${!selectedAddress ? 'border-red-400 bg-red-50' : ''}`}
+                      onPress={() => setShowAddressModal(true)}
+                    >
+                      <View style={tw`flex-1`}>
+                        {selectedAddress ? (
+                          <>
+                            <Text style={tw`text-gray-800 font-medium mb-1`}>
+                              {selectedAddress.recipientName} - {selectedAddress.recipientPhone}
+                            </Text>
+                            <Text style={tw`text-gray-600 text-sm`} numberOfLines={2}>
+                              {selectedAddress.street}
+                            </Text>
+                            {selectedAddress.isDefault && (
+                              <View style={tw`mt-1`}>
+                                <Text style={tw`text-blue-600 text-xs font-medium`}>Địa chỉ mặc định</Text>
+                              </View>
+                            )}
+                          </>
+                        ) : (
+                          <Text style={tw`text-gray-400`}>Chọn địa chỉ giao hàng</Text>
+                        )}
+                      </View>
+                      <Icon name="chevron-forward" type="ionicon" size={20} color="#666" />
+                    </Pressable>
+                  )}
                 </View>
 
                 {/* Note */}
@@ -958,17 +1971,22 @@ const Checkout = () => {
                     <ActivityIndicator size="large" color="#2563eb" />
                   </View>
                 ) : (
-                  provinces.map((province) => (
-                    <Pressable
-                      key={province.id}
-                      style={tw`p-4 border-b border-gray-100 ${formData.provinceId === province.id ? 'bg-blue-50' : ''}`}
-                      onPress={() => handleProvinceSelect(province)}
-                    >
-                      <Text style={tw`text-gray-800 ${formData.provinceId === province.id ? 'font-bold' : ''}`}>
-                        {province.name}
-                      </Text>
-                    </Pressable>
-                  ))
+                  provinces.map((province) => {
+                    const isSelected = isSelectingForNewAddress
+                      ? newAddressForm.provinceId === province.id
+                      : formData.provinceId === province.id;
+                    return (
+                      <Pressable
+                        key={province.id}
+                        style={tw`p-4 border-b border-gray-100 ${isSelected ? 'bg-blue-50' : ''}`}
+                        onPress={() => handleProvinceSelect(province)}
+                      >
+                        <Text style={tw`text-gray-800 ${isSelected ? 'font-bold' : ''}`}>
+                          {province.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })
                 )}
               </ScrollView>
             </View>
@@ -995,23 +2013,281 @@ const Checkout = () => {
                   <View style={tw`p-8 items-center`}>
                     <ActivityIndicator size="large" color="#2563eb" />
                   </View>
-                ) : communes.length === 0 ? (
+                ) : (isSelectingForNewAddress ? communesForNew : communes).length === 0 ? (
                   <View style={tw`p-8 items-center`}>
                     <Text style={tw`text-gray-500`}>Không có dữ liệu</Text>
                   </View>
                 ) : (
-                  communes.map((commune) => (
-                    <Pressable
-                      key={commune.id}
-                      style={tw`p-4 border-b border-gray-100 ${formData.communeId === commune.id ? 'bg-blue-50' : ''}`}
-                      onPress={() => handleCommuneSelect(commune)}
-                    >
-                      <Text style={tw`text-gray-800 ${formData.communeId === commune.id ? 'font-bold' : ''}`}>
-                        {commune.name}
-                      </Text>
-                    </Pressable>
-                  ))
+                  (isSelectingForNewAddress ? communesForNew : communes).map((commune) => {
+                    const isSelected = isSelectingForNewAddress
+                      ? newAddressForm.communeId === commune.id
+                      : formData.communeId === commune.id;
+                    return (
+                      <Pressable
+                        key={commune.id}
+                        style={tw`p-4 border-b border-gray-100 ${isSelected ? 'bg-blue-50' : ''}`}
+                        onPress={() => handleCommuneSelect(commune)}
+                      >
+                        <Text style={tw`text-gray-800 ${isSelected ? 'font-bold' : ''}`}>
+                          {commune.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })
                 )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Address Selection Modal */}
+        <Modal
+          visible={showAddressModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowAddressModal(false)}
+        >
+          <View style={tw`flex-1 bg-black bg-opacity-50 justify-end`}>
+            <View style={tw`bg-white rounded-t-3xl max-h-96`}>
+              <View style={tw`p-4 border-b border-gray-200 flex-row justify-between items-center`}>
+                <Text style={tw`text-lg font-bold text-gray-800`}>Chọn địa chỉ giao hàng</Text>
+                <Pressable onPress={() => setShowAddressModal(false)}>
+                  <Icon name="close" type="ionicon" size={24} color="#666" />
+                </Pressable>
+              </View>
+              <ScrollView style={tw`max-h-80`}>
+                {loadingAddresses ? (
+                  <View style={tw`p-8 items-center`}>
+                    <ActivityIndicator size="large" color="#2563eb" />
+                    <Text style={tw`text-gray-600 mt-2`}>Đang tải...</Text>
+                  </View>
+                ) : customerAddresses.length === 0 ? (
+                  <View style={tw`p-8 items-center`}>
+                    <Text style={tw`text-gray-500 text-center mb-4`}>
+                      Bạn chưa có địa chỉ nào.
+                    </Text>
+                    <Pressable
+                      style={tw`bg-blue-600 rounded-lg px-6 py-3`}
+                      onPress={() => {
+                        setShowAddressModal(false);
+                        resetAddressForm();
+                        setShowAddAddressModal(true);
+                      }}
+                    >
+                      <Text style={tw`text-white font-bold`}>Thêm địa chỉ mới</Text>
+                    </Pressable>
+                  </View>
+                ) : (
+                  <>
+                    {customerAddresses.map((address) => (
+                      <View key={address.id} style={tw`border-b border-gray-100`}>
+                        <Pressable
+                          style={tw`p-4 ${selectedAddress?.id === address.id ? 'bg-blue-50' : ''}`}
+                          onPress={() => handleAddressSelect(address)}
+                        >
+                          <View style={tw`flex-row items-start justify-between mb-2`}>
+                            <View style={tw`flex-1`}>
+                              <Text style={tw`text-gray-800 font-bold text-base mb-1`}>
+                                {address.recipientName}
+                              </Text>
+                              <Text style={tw`text-gray-600 text-sm mb-1`}>
+                                {address.recipientPhone}
+                              </Text>
+                              <Text style={tw`text-gray-700 text-sm`} numberOfLines={2}>
+                                {address.street}
+                              </Text>
+                            </View>
+                            {selectedAddress?.id === address.id && (
+                              <Icon name="checkmark-circle" type="ionicon" size={24} color="#2563eb" />
+                            )}
+                          </View>
+                          {address.isDefault && (
+                            <View style={tw`mt-2`}>
+                              <View style={tw`bg-blue-100 px-2 py-1 rounded self-start`}>
+                                <Text style={tw`text-blue-600 text-xs font-medium`}>Địa chỉ mặc định</Text>
+                              </View>
+                            </View>
+                          )}
+                        </Pressable>
+                        <View style={tw`px-4 pb-3 flex-row justify-end`}>
+                          <Pressable
+                            style={tw`flex-row items-center mr-4`}
+                            onPress={() => loadAddressForEdit(address)}
+                          >
+                            <Icon name="create-outline" type="ionicon" size={20} color="#2563eb" />
+                            <Text style={tw`text-blue-600 ml-1 text-sm font-medium`}>Chỉnh sửa</Text>
+                          </Pressable>
+                          <Pressable
+                            style={tw`flex-row items-center`}
+                            onPress={() => handleDeleteAddress(address)}
+                            disabled={deletingAddressId === address.id}
+                          >
+                            {deletingAddressId === address.id ? (
+                              <ActivityIndicator size="small" color="#ef4444" />
+                            ) : (
+                              <Icon name="trash-outline" type="ionicon" size={20} color="#ef4444" />
+                            )}
+                            <Text style={tw`text-red-600 ml-1 text-sm font-medium`}>
+                              {deletingAddressId === address.id ? 'Đang xóa...' : 'Xóa'}
+                            </Text>
+                          </Pressable>
+                        </View>
+                      </View>
+                    ))}
+                    <Pressable
+                      style={tw`p-4 border-t border-gray-200 flex-row items-center justify-center bg-gray-50`}
+                      onPress={() => {
+                        setShowAddressModal(false);
+                        resetAddressForm();
+                        setShowAddAddressModal(true);
+                      }}
+                    >
+                      <Icon name="add-circle-outline" type="ionicon" size={24} color="#2563eb" />
+                      <Text style={tw`text-blue-600 font-bold ml-2`}>Thêm địa chỉ mới</Text>
+                    </Pressable>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Add New Address Modal */}
+        <Modal
+          visible={showAddAddressModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowAddAddressModal(false)}
+        >
+          <View style={tw`flex-1 bg-black bg-opacity-50 justify-end`}>
+            <View style={tw`bg-white rounded-t-3xl max-h-5/6`}>
+              <View style={tw`p-4 border-b border-gray-200 flex-row justify-between items-center`}>
+                <Text style={tw`text-lg font-bold text-gray-800`}>
+                  {editingAddressId ? 'Chỉnh sửa địa chỉ' : 'Thêm địa chỉ mới'}
+                </Text>
+                <Pressable onPress={() => {
+                  setShowAddAddressModal(false);
+                  resetAddressForm();
+                }}>
+                  <Icon name="close" type="ionicon" size={24} color="#666" />
+                </Pressable>
+              </View>
+              <ScrollView style={tw`max-h-96 p-4`}>
+                {/* Recipient Name */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Họ tên người nhận *</Text>
+                  <TextInput
+                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
+                    value={newAddressForm.recipientName}
+                    onChangeText={(text) => setNewAddressForm((prev) => ({ ...prev, recipientName: text }))}
+                    placeholder="Nhập họ tên người nhận"
+                  />
+                </View>
+
+                {/* Phone Number */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Số điện thoại *</Text>
+                  <TextInput
+                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
+                    value={newAddressForm.recipientPhone}
+                    onChangeText={(text) => setNewAddressForm((prev) => ({ ...prev, recipientPhone: text }))}
+                    placeholder="Nhập số điện thoại"
+                    keyboardType="phone-pad"
+                  />
+                </View>
+
+                {/* Province */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Tỉnh/Thành phố *</Text>
+                  <Pressable
+                    style={tw`border border-gray-300 rounded-lg p-3 flex-row justify-between items-center`}
+                    onPress={() => {
+                      setIsSelectingForNewAddress(true);
+                      setShowProvinceModal(true);
+                    }}
+                  >
+                    <Text style={tw`text-gray-800 ${selectedProvinceForNew ? '' : 'text-gray-400'}`}>
+                      {selectedProvinceForNew ? selectedProvinceForNew.name : 'Chọn tỉnh/thành phố'}
+                    </Text>
+                    <Icon name="chevron-down" type="ionicon" size={20} color="#666" />
+                  </Pressable>
+                </View>
+
+                {/* Commune */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Phường/Xã *</Text>
+                  <Pressable
+                    style={tw`border border-gray-300 rounded-lg p-3 flex-row justify-between items-center ${!selectedProvinceForNew ? 'opacity-50' : ''}`}
+                    onPress={() => {
+                      if (selectedProvinceForNew) {
+                        setIsSelectingForNewAddress(true);
+                        setShowCommuneModal(true);
+                      }
+                    }}
+                    disabled={!selectedProvinceForNew}
+                  >
+                    <Text style={tw`text-gray-800 ${selectedCommuneForNew ? '' : 'text-gray-400'}`}>
+                      {selectedCommuneForNew ? selectedCommuneForNew.name : 'Chọn phường/xã'}
+                    </Text>
+                    <Icon name="chevron-down" type="ionicon" size={20} color="#666" />
+                  </Pressable>
+                </View>
+
+                {/* Street Address */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Số nhà/Đường *</Text>
+                  <TextInput
+                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
+                    value={newAddressForm.street}
+                    onChangeText={(text) => setNewAddressForm((prev) => ({ ...prev, street: text }))}
+                    placeholder="Nhập số nhà, tên đường"
+                    multiline
+                  />
+                </View>
+
+                {/* Postal Code */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Mã bưu điện</Text>
+                  <TextInput
+                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
+                    value={newAddressForm.postalCode}
+                    onChangeText={(text) => setNewAddressForm((prev) => ({ ...prev, postalCode: text }))}
+                    placeholder="Nhập mã bưu điện (tùy chọn)"
+                    keyboardType="numeric"
+                  />
+                </View>
+
+                {/* Is Default Checkbox */}
+                <View style={tw`mb-4 flex-row items-center`}>
+                  <Pressable
+                    style={tw`flex-row items-center`}
+                    onPress={() => setNewAddressForm((prev) => ({ ...prev, isDefault: !prev.isDefault }))}
+                  >
+                    <Icon
+                      name={newAddressForm.isDefault ? 'checkbox' : 'checkbox-outline'}
+                      type="ionicon"
+                      size={24}
+                      color={newAddressForm.isDefault ? '#2563eb' : '#666'}
+                      style={tw`mr-2`}
+                    />
+                    <Text style={tw`text-gray-700`}>Đặt làm địa chỉ mặc định</Text>
+                  </Pressable>
+                </View>
+
+                {/* Save Button */}
+                <Pressable
+                  style={tw`bg-blue-600 rounded-lg p-4 mb-4 ${savingAddress ? 'opacity-50' : ''}`}
+                  onPress={handleSaveAddress}
+                  disabled={savingAddress}
+                >
+                  {savingAddress ? (
+                    <ActivityIndicator size="small" color="white" />
+                  ) : (
+                    <Text style={tw`text-white text-center font-bold text-lg`}>
+                      {editingAddressId ? 'Cập nhật địa chỉ' : 'Lưu địa chỉ'}
+                    </Text>
+                  )}
+                </Pressable>
               </ScrollView>
             </View>
           </View>
@@ -1077,4 +2353,3 @@ const Checkout = () => {
 export default Checkout;
 
 const styles = StyleSheet.create({});
-

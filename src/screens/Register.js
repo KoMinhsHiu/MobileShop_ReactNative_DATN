@@ -1,4 +1,4 @@
-import React, {useState} from 'react';
+import React, {useState, useEffect} from 'react';
 import {
   View,
   TextInput,
@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import {Icon} from 'react-native-elements';
-import {useNavigation} from '@react-navigation/native';
+import {useNavigation, useRoute} from '@react-navigation/native';
 import tw from 'tailwind-react-native-classnames';
 import {TitleText, BodyText} from '../components/ThemeText';
 import {COLORS, SPACING, BORDER_RADIUS, TYPOGRAPHY} from '../constants/theme';
@@ -20,6 +20,10 @@ import {getApiUrl, API_ENDPOINTS} from '../config/api';
 
 const Register = () => {
   const navigation = useNavigation();
+  const route = useRoute();
+  const googleUser = route.params?.googleUser;
+  const fromGoogle = route.params?.fromGoogle || false;
+  
   const [formData, setFormData] = useState({
     username: '',
     email: '',
@@ -34,6 +38,22 @@ const Register = () => {
   const [errors, setErrors] = useState({});
   const [loading, setLoading] = useState(false);
 
+  // Tự động điền form nếu có thông tin từ Google
+  useEffect(() => {
+    if (googleUser && fromGoogle) {
+      setFormData(prev => ({
+        ...prev,
+        email: googleUser.email || '',
+        firstName: googleUser.firstName || '',
+        lastName: googleUser.lastName || '',
+        // Tạo username từ email (phần trước @)
+        username: googleUser.email ? googleUser.email.split('@')[0] : '',
+        // Password có thể để trống hoặc tạo tự động, user sẽ nhập
+        password: '',
+      }));
+    }
+  }, [googleUser, fromGoogle]);
+
   const validateForm = () => {
     const newErrors = {};
 
@@ -47,10 +67,19 @@ const Register = () => {
       newErrors.email = 'Email không hợp lệ';
     }
 
-    if (!formData.password.trim()) {
-      newErrors.password = 'Vui lòng nhập mật khẩu';
-    } else if (formData.password.length < 6) {
-      newErrors.password = 'Mật khẩu phải có ít nhất 6 ký tự';
+    // Nếu đăng ký từ Google, password không bắt buộc (có thể tạo tự động)
+    // Nếu không phải từ Google, password là bắt buộc
+    if (!fromGoogle) {
+      if (!formData.password.trim()) {
+        newErrors.password = 'Vui lòng nhập mật khẩu';
+      } else if (formData.password.length < 6) {
+        newErrors.password = 'Mật khẩu phải có ít nhất 6 ký tự';
+      }
+    } else {
+      // Đăng ký từ Google: nếu có password thì phải >= 6 ký tự, nếu không có thì tạo tự động
+      if (formData.password.trim() && formData.password.length < 6) {
+        newErrors.password = 'Mật khẩu phải có ít nhất 6 ký tự';
+      }
     }
 
     if (!formData.phone.trim()) {
@@ -86,10 +115,18 @@ const Register = () => {
         const apiUrl = getApiUrl(API_ENDPOINTS.REGISTER);
         console.log('Calling Register API:', apiUrl);
         
+        // Nếu đăng ký từ Google và không có password, tạo password tự động
+        let password = formData.password;
+        if (fromGoogle && !password.trim()) {
+          // Tạo password tự động (có thể dùng Google ID + timestamp)
+          password = `Google_${googleUser?.id || Date.now()}_${Math.random().toString(36).substring(7)}`;
+          console.log('[Register] Tạo password tự động cho Google user');
+        }
+        
         const registerData = {
           username: formData.username.trim(),
           email: formData.email.trim(),
-          password: formData.password,
+          password: password,
           phone: formData.phone.trim(),
           roleId: parseInt(formData.roleId, 10),
           firstName: formData.firstName.trim(),
@@ -313,8 +350,17 @@ const Register = () => {
               Đăng Ký
             </TitleText>
             <BodyText style={tw`text-gray-600 text-center`}>
-              Tạo tài khoản mới để bắt đầu
+              {fromGoogle 
+                ? 'Hoàn tất đăng ký với tài khoản Google của bạn'
+                : 'Tạo tài khoản mới để bắt đầu'}
             </BodyText>
+            {fromGoogle && (
+              <View style={tw`mt-3 bg-blue-50 rounded-lg p-3 border border-blue-200`}>
+                <BodyText style={tw`text-blue-700 text-center text-sm`}>
+                  Thông tin từ Google đã được điền sẵn. Vui lòng bổ sung thông tin còn thiếu.
+                </BodyText>
+              </View>
+            )}
           </View>
 
           {/* Form */}
@@ -338,7 +384,14 @@ const Register = () => {
               'Mật khẩu',
               'password',
               'lock-closed-outline',
-              'Nhập mật khẩu (tối thiểu 6 ký tự)',
+              fromGoogle 
+                ? 'Nhập mật khẩu (tùy chọn, để trống sẽ tạo tự động)'
+                : 'Nhập mật khẩu (tối thiểu 6 ký tự)',
+            )}
+            {fromGoogle && (
+              <BodyText style={tw`text-gray-500 text-xs mb-4 -mt-2`}>
+                * Nếu để trống, hệ thống sẽ tạo mật khẩu tự động. Bạn có thể đổi sau khi đăng ký.
+              </BodyText>
             )}
 
             {renderInput(

@@ -10,8 +10,10 @@ import {
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'react';
 import { useNavigation } from '@react-navigation/native';
 import Wrapper from '../components/Wrapper/Wrapper';
 import CustomStatusBar from '../components/CustomStatusBar';
@@ -23,8 +25,18 @@ import { getApiUrl, API_ENDPOINTS } from '../config/api';
 const UserPanel = () => {
   const navigation = useNavigation();
   const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+  const [isChatModalVisible, setIsChatModalVisible] = useState(false);
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [messages, setMessages] = useState([
+    {
+      id: 1,
+      text: 'Xin chào! Tôi là trợ lý AI. Tôi có thể giúp gì cho bạn?',
+      sender: 'ai',
+      timestamp: new Date(),
+    },
+  ]);
+  const [messageInput, setMessageInput] = useState('');
   const [userInfo, setUserInfo] = useState({
     avatar: 'https://i.ibb.co/5sJj2WX/default-avatar.png',
     fullName: '',
@@ -148,6 +160,15 @@ const UserPanel = () => {
     );
   };
 
+  const openChatModal = () => {
+    setIsChatModalVisible(true);
+  };
+
+  const closeChatModal = () => {
+    setIsChatModalVisible(false);
+  };
+
+
   const handleLogout = async () => {
     Alert.alert(
       'Đăng xuất',
@@ -245,8 +266,8 @@ const UserPanel = () => {
         </View>
 
         {/* User Information */}
-        <View style={tw`space-y-4`}>
-          <View style={tw`flex-row items-center`}>
+        <View>
+          <View style={tw`flex-row items-center mb-4`}>
             <Icon name="person" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
             <View style={tw`flex-1`}>
               <Text style={tw`text-gray-500 text-sm`}>Full Name</Text>
@@ -254,7 +275,7 @@ const UserPanel = () => {
             </View>
           </View>
 
-          <View style={tw`flex-row items-center`}>
+          <View style={tw`flex-row items-center mb-4`}>
             <Icon name="mail" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
             <View style={tw`flex-1`}>
               <Text style={tw`text-gray-500 text-sm`}>Email</Text>
@@ -262,7 +283,7 @@ const UserPanel = () => {
             </View>
           </View>
 
-          <View style={tw`flex-row items-center`}>
+          <View style={tw`flex-row items-center mb-4`}>
             <Icon name="call" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
             <View style={tw`flex-1`}>
               <Text style={tw`text-gray-500 text-sm`}>Phone Number</Text>
@@ -271,7 +292,7 @@ const UserPanel = () => {
           </View>
 
           {userInfo.dateOfBirth && (
-            <View style={tw`flex-row items-center`}>
+            <View style={tw`flex-row items-center mb-4`}>
               <Icon name="calendar" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
               <View style={tw`flex-1`}>
                 <Text style={tw`text-gray-500 text-sm`}>Date of Birth</Text>
@@ -281,7 +302,7 @@ const UserPanel = () => {
           )}
 
           {userInfo.gender && (
-            <View style={tw`flex-row items-center`}>
+            <View style={tw`flex-row items-center mb-4`}>
               <Icon name="people" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
               <View style={tw`flex-1`}>
                 <Text style={tw`text-gray-500 text-sm`}>Gender</Text>
@@ -333,14 +354,14 @@ const UserPanel = () => {
       </View>
       
       <View style={tw`p-4`}>
-        <View style={tw`space-y-3`}>
-          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}>
+        <View>
+          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="receipt" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
             <Text style={tw`text-gray-800 font-medium flex-1`}>Order History</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
-          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}>
+          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="card" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
             <Text style={tw`text-gray-800 font-medium flex-1`}>Payment Methods</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
@@ -365,22 +386,25 @@ const UserPanel = () => {
       </View>
       
       <View style={tw`p-4`}>
-        <View style={tw`space-y-3`}>
-          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}>
+        <View>
+          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="notifications" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
             <Text style={tw`text-gray-800 font-medium flex-1`}>Notifications</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
-          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}>
+          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="shield-checkmark" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
             <Text style={tw`text-gray-800 font-medium flex-1`}>Privacy & Security</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
-          <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}>
-            <Icon name="help-circle" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
-            <Text style={tw`text-gray-800 font-medium flex-1`}>Help & Support</Text>
+          <Pressable 
+            style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}
+            onPress={openChatModal}
+          >
+            <Icon name="chatbubble-ellipses" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
+            <Text style={tw`text-gray-800 font-medium flex-1`}>📩 Hỗ trợ / Chat với AI</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
@@ -411,6 +435,246 @@ const UserPanel = () => {
       </View>
     </View>
   );
+
+  // Refs cho ChatModal
+  const chatScrollViewRef = useRef(null);
+  const chatTextInputRef = useRef(null);
+
+  // Auto scroll khi có tin nhắn mới
+  useEffect(() => {
+    if (isChatModalVisible && chatScrollViewRef.current) {
+      setTimeout(() => {
+        chatScrollViewRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }
+  }, [messages, isChatModalVisible]);
+
+  // Focus TextInput khi modal mở
+  useEffect(() => {
+    if (isChatModalVisible) {
+      setTimeout(() => {
+        chatTextInputRef.current?.focus();
+      }, 300);
+    }
+  }, [isChatModalVisible]);
+
+  const handleSendMessage = useCallback(async () => {
+    if (messageInput.trim() === '') return;
+
+    const query = messageInput.trim();
+    console.log('[Chat] Bắt đầu gửi tin nhắn:', query);
+    setMessageInput('');
+
+    // Thêm tin nhắn của user
+    const userMessage = {
+      id: Date.now(),
+      text: query,
+      sender: 'user',
+      timestamp: new Date(),
+    };
+    setMessages(prev => [...prev, userMessage]);
+
+    // Focus lại TextInput sau khi gửi
+    setTimeout(() => {
+      chatTextInputRef.current?.focus();
+    }, 100);
+
+    // Tạo tin nhắn AI placeholder để stream vào
+    const aiMessageId = Date.now() + 1;
+    const aiMessage = {
+      id: aiMessageId,
+      text: '',
+      sender: 'ai',
+      timestamp: new Date(),
+      isStreaming: true,
+    };
+    setMessages(prev => [...prev, aiMessage]);
+
+    try {
+      const token = await getAuthToken();
+      const apiUrl = getApiUrl(API_ENDPOINTS.AI_CHAT);
+      
+      console.log('[Chat] API URL:', apiUrl);
+      console.log('[Chat] Token có sẵn:', token ? 'Có' : 'Không');
+      console.log('[Chat] Request body:', JSON.stringify({ query }));
+      
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': token ? `Bearer ${token}` : '',
+        },
+        body: JSON.stringify({ query }),
+      });
+
+      console.log('[Chat] Response status:', response.status);
+      console.log('[Chat] Response headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
+      console.log('[Chat] Response ok:', response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[Chat] HTTP Error Response:', errorText);
+        throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+      }
+
+      // React Native không hỗ trợ response.body.getReader(), sử dụng XMLHttpRequest thay thế
+      console.log('[Chat] Sử dụng XMLHttpRequest để đọc SSE stream');
+      
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        let buffer = '';
+        let accumulatedContent = '';
+        let eventCount = 0;
+
+        xhr.open('POST', apiUrl, true);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        if (token) {
+          xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+        }
+
+        xhr.onprogress = () => {
+          // Đọc dữ liệu mới từ responseText
+          const newData = xhr.responseText.substring(buffer.length);
+          buffer = xhr.responseText;
+          
+          if (newData) {
+            console.log('[Chat] Nhận được chunk mới, độ dài:', newData.length);
+            const lines = newData.split('\n');
+            
+            for (const line of lines) {
+              if (!line.trim()) continue;
+              
+              console.log('[Chat] Xử lý dòng:', line.substring(0, 200));
+              
+              if (line.startsWith('data: ')) {
+                try {
+                  const jsonStr = line.substring(6).trim();
+                  if (!jsonStr) {
+                    console.log('[Chat] Dòng data rỗng, bỏ qua');
+                    continue;
+                  }
+                  
+                  console.log('[Chat] JSON string:', jsonStr);
+                  const data = JSON.parse(jsonStr);
+                  eventCount++;
+                  console.log('[Chat] Event #' + eventCount + ':', JSON.stringify(data));
+                  
+                  if (data.status === 'start') {
+                    console.log('[Chat] Stream bắt đầu');
+                    accumulatedContent = '';
+                    continue;
+                  } else if (data.status === 'complete') {
+                    console.log('[Chat] Stream hoàn thành');
+                    setMessages(prev => prev.map(msg => 
+                      msg.id === aiMessageId 
+                        ? { ...msg, text: accumulatedContent, isStreaming: false }
+                        : msg
+                    ));
+                    resolve();
+                    return;
+                  } else if (data.status === 'error') {
+                    console.error('[Chat] Lỗi từ server:', data.error);
+                    reject(new Error(data.error || 'Có lỗi xảy ra'));
+                    return;
+                  } else if (data.role === 'Assistant' && data.content !== undefined) {
+                    console.log('[Chat] Nhận tin nhắn Assistant, isPartial:', data.isPartial, 'content length:', data.content.length);
+                    if (data.isPartial === false) {
+                      accumulatedContent = data.content;
+                      console.log('[Chat] Cập nhật nội dung đầy đủ:', accumulatedContent.substring(0, 100));
+                      setMessages(prev => prev.map(msg => 
+                        msg.id === aiMessageId 
+                          ? { ...msg, text: accumulatedContent, isStreaming: false }
+                          : msg
+                      ));
+                    } else if (data.isPartial === true) {
+                      const oldContent = accumulatedContent;
+                      if (data.content.length >= accumulatedContent.length && 
+                          data.content.startsWith(accumulatedContent)) {
+                        accumulatedContent = data.content;
+                        console.log('[Chat] Cập nhật toàn bộ nội dung (từ', oldContent.length, '->', accumulatedContent.length, 'ký tự)');
+                      } else if (data.content.length < accumulatedContent.length) {
+                        accumulatedContent += data.content;
+                        console.log('[Chat] Cộng dồn phần mới (từ', oldContent.length, '->', accumulatedContent.length, 'ký tự)');
+                      } else {
+                        accumulatedContent = data.content;
+                        console.log('[Chat] Thay thế nội dung (từ', oldContent.length, '->', accumulatedContent.length, 'ký tự)');
+                      }
+                      
+                      setMessages(prev => prev.map(msg => 
+                        msg.id === aiMessageId 
+                          ? { ...msg, text: accumulatedContent, isStreaming: true }
+                          : msg
+                      ));
+                    }
+                  } else if (data.role === 'Human') {
+                    console.log('[Chat] Nhận tin nhắn Human:', data.content);
+                  } else {
+                    console.log('[Chat] Event không xử lý:', JSON.stringify(data));
+                  }
+                } catch (e) {
+                  console.error('[Chat] Lỗi parse JSON:', e.message);
+                  console.error('[Chat] Dòng gây lỗi:', line);
+                  console.error('[Chat] Stack trace:', e.stack);
+                }
+              } else {
+                console.log('[Chat] Dòng không bắt đầu bằng "data: ":', line.substring(0, 100));
+              }
+            }
+          }
+        };
+
+        xhr.onload = () => {
+          console.log('[Chat] XHR onload, status:', xhr.status);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            console.log('[Chat] Stream kết thúc. Tổng số events:', eventCount);
+            console.log('[Chat] Nội dung cuối cùng:', accumulatedContent);
+            if (accumulatedContent) {
+              setMessages(prev => prev.map(msg => 
+                msg.id === aiMessageId 
+                  ? { ...msg, text: accumulatedContent, isStreaming: false }
+                  : msg
+              ));
+            }
+            resolve();
+          } else {
+            reject(new Error(`HTTP error! status: ${xhr.status}`));
+          }
+        };
+
+        xhr.onerror = () => {
+          console.error('[Chat] XHR onerror');
+          reject(new Error('Network error'));
+        };
+
+        xhr.ontimeout = () => {
+          console.error('[Chat] XHR ontimeout');
+          reject(new Error('Request timeout'));
+        };
+
+        xhr.timeout = 60000; // 60 seconds timeout
+        xhr.send(JSON.stringify({ query }));
+      });
+    } catch (error) {
+      console.error('[Chat] Lỗi khi gửi tin nhắn:');
+      console.error('[Chat] Error name:', error.name);
+      console.error('[Chat] Error message:', error.message);
+      console.error('[Chat] Error stack:', error.stack);
+      
+      // Xóa tin nhắn AI đang stream và thêm tin nhắn lỗi
+      setMessages(prev => {
+        const filtered = prev.filter(msg => msg.id !== aiMessageId);
+        return [...filtered, {
+          id: Date.now() + 2,
+          text: `Xin lỗi, đã có lỗi xảy ra: ${error.message}. Vui lòng thử lại sau.`,
+          sender: 'ai',
+          timestamp: new Date(),
+          isStreaming: false,
+        }];
+      });
+      
+      Alert.alert('Lỗi', `Không thể gửi tin nhắn: ${error.message}\n\nVui lòng kiểm tra console log để biết thêm chi tiết.`);
+    }
+  }, [messageInput]);
 
   const EditModal = () => (
     <Modal
@@ -448,8 +712,8 @@ const UserPanel = () => {
           </View>
 
           {/* Form Fields */}
-          <View style={tw`space-y-4`}>
-            <View>
+          <View>
+            <View style={tw`mb-4`}>
               <Text style={tw`text-gray-700 font-medium mb-2`}>Full Name</Text>
               <TextInput
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
@@ -459,7 +723,7 @@ const UserPanel = () => {
               />
             </View>
 
-            <View>
+            <View style={tw`mb-4`}>
               <Text style={tw`text-gray-700 font-medium mb-2`}>Email</Text>
               <TextInput
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
@@ -470,7 +734,7 @@ const UserPanel = () => {
               />
             </View>
 
-            <View>
+            <View style={tw`mb-4`}>
               <Text style={tw`text-gray-700 font-medium mb-2`}>Phone Number</Text>
               <TextInput
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
@@ -481,7 +745,7 @@ const UserPanel = () => {
               />
             </View>
 
-            <View>
+            <View style={tw`mb-4`}>
               <Text style={tw`text-gray-700 font-medium mb-2`}>Date of Birth (Optional)</Text>
               <TextInput
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
@@ -493,9 +757,9 @@ const UserPanel = () => {
 
             <View>
               <Text style={tw`text-gray-700 font-medium mb-2`}>Gender (Optional)</Text>
-              <View style={tw`flex-row space-x-4`}>
+              <View style={tw`flex-row`}>
                 <Pressable
-                  style={tw`flex-row items-center flex-1 p-3 border rounded-lg ${
+                  style={tw`flex-row items-center flex-1 p-3 border rounded-lg mr-4 ${
                     editForm.gender === 'Male' ? 'border-blue-600 bg-blue-50' : 'border-gray-300'
                   }`}
                   onPress={() => setEditForm({ ...editForm, gender: 'Male' })}
@@ -569,6 +833,127 @@ const UserPanel = () => {
 
         {/* Edit Modal */}
         <EditModal />
+        
+        {/* Chat Modal - Luôn render để tránh unmount/mount */}
+        <Modal
+          visible={isChatModalVisible}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={closeChatModal}
+          transparent={false}
+        >
+            <KeyboardAvoidingView 
+              style={tw`flex-1`}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+              keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+            >
+              <View style={tw`flex-1 bg-white`}>
+                {/* Header */}
+                <View style={tw`flex-row items-center justify-between p-4 border-b border-gray-200 bg-blue-600`}>
+                  <View style={tw`flex-row items-center flex-1`}>
+                    <Icon name="chatbubble-ellipses" type="ionicon" size={24} color="white" style={tw`mr-2`} />
+                    <Text style={tw`text-white text-lg font-bold`}>Chat với AI</Text>
+                  </View>
+                  <Pressable onPress={closeChatModal}>
+                    <Icon name="close" type="ionicon" size={28} color="white" />
+                  </Pressable>
+                </View>
+
+                {/* Messages List */}
+                <ScrollView 
+                  ref={chatScrollViewRef}
+                  style={tw`flex-1 p-4`}
+                  contentContainerStyle={tw`pb-4`}
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="none"
+                  removeClippedSubviews={false}
+                  showsVerticalScrollIndicator={true}
+                >
+                  {messages.map((message) => (
+                    <View
+                      key={message.id}
+                      style={tw`mb-4 ${
+                        message.sender === 'user' ? 'items-end' : 'items-start'
+                      }`}
+                    >
+                      <View
+                        style={[
+                          tw`rounded-2xl p-3 ${
+                            message.sender === 'user'
+                              ? 'bg-blue-600 rounded-br-sm'
+                              : 'bg-gray-200 rounded-bl-sm'
+                          }`,
+                          {maxWidth: '75%'},
+                        ]}
+                      >
+                        <View style={tw`flex-row items-end`}>
+                          <Text
+                            style={tw`${
+                              message.sender === 'user' ? 'text-white' : 'text-gray-800'
+                            }`}
+                          >
+                            {message.text || (message.isStreaming ? '...' : '')}
+                          </Text>
+                          {message.isStreaming && (
+                            <View style={tw`ml-1 mb-1`}>
+                              <ActivityIndicator size="small" color={message.sender === 'user' ? '#93c5fd' : '#6b7280'} />
+                            </View>
+                          )}
+                        </View>
+                        {!message.isStreaming && (
+                          <Text
+                            style={tw`text-xs mt-1 ${
+                              message.sender === 'user' ? 'text-blue-200' : 'text-gray-500'
+                            }`}
+                          >
+                            {new Date(message.timestamp).toLocaleTimeString('vi-VN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </Text>
+                        )}
+                      </View>
+                    </View>
+                  ))}
+                </ScrollView>
+
+                {/* Input Area */}
+                <View style={tw`border-t border-gray-200 p-4 bg-gray-50`} collapsable={false}>
+                  <View style={tw`flex-row items-center`} collapsable={false}>
+                    <TextInput
+                      ref={chatTextInputRef}
+                      style={tw`flex-1 bg-white border border-gray-300 rounded-full px-4 py-3 text-gray-800 mr-2`}
+                      value={messageInput}
+                      onChangeText={setMessageInput}
+                      placeholder="Nhập tin nhắn..."
+                      placeholderTextColor="#999"
+                      multiline
+                      maxLength={500}
+                      blurOnSubmit={false}
+                      returnKeyType="send"
+                      onSubmitEditing={handleSendMessage}
+                      textContentType="none"
+                      autoCorrect={true}
+                      autoCapitalize="sentences"
+                      underlineColorAndroid="transparent"
+                      importantForAutofill="no"
+                      autoComplete="off"
+                      keyboardType="default"
+                    />
+                    <Pressable
+                      style={tw`bg-blue-600 w-12 h-12 rounded-full items-center justify-center ${
+                        messageInput.trim() === '' ? 'opacity-50' : ''
+                      }`}
+                      onPress={handleSendMessage}
+                      disabled={messageInput.trim() === ''}
+                    >
+                      <Icon name="send" type="ionicon" size={20} color="white" />
+                    </Pressable>
+                  </View>
+                </View>
+              </View>
+            </KeyboardAvoidingView>
+          </Modal>
       </Wrapper>
     </>
   );

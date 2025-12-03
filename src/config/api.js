@@ -27,8 +27,19 @@ export const API_ENDPOINTS = {
   REGISTER: '/api/v1/auth/register',
   LOGOUT: '/api/v1/auth/logout',
   REFRESH_TOKEN: '/api/v1/auth/refresh',
+  GOOGLE_LOGIN: '/api/v1/auth/google',
+  GOOGLE_CALLBACK: '/api/v1/auth/google/callback',
+  GOOGLE_MOBILE_CALLBACK: '/api/v1/auth/google/mobile/callback', // Endpoint cho mobile - nhận idToken
   GET_CUSTOMER_ME: '/api/v1/customers/me',
+  GET_CUSTOMER_ADDRESSES: '/api/v1/customers/addresses',
+  CREATE_CUSTOMER_ADDRESS: '/api/v1/customers/addresses',
+  UPDATE_CUSTOMER_ADDRESS: '/api/v1/customers/addresses/update', // Will append /:addressId
+  DELETE_CUSTOMER_ADDRESS: '/api/v1/customers/addresses/delete', // Will append /:addressId
   GET_PAYMENT_METHODS: '/api/v1/payments/methods',
+  CREATE_ORDER: '/api/v1/orders/create',
+  VNPAY_MOBILE_CREATE: '/api/v1/payments/vnpay/mobile/create',
+  VNPAY_MOBILE_CALLBACK: '/api/v1/payments/vnpay/mobile/callback',
+  AI_CHAT: '/api/v1/ai/chat',
   // Thêm các endpoints khác ở đây
 };
 

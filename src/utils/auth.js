@@ -141,93 +141,6 @@ export const refreshAccessToken = async () => {
 };
 
 /**
- * Tự động đăng nhập lại với tài khoản đã lưu
- * Gọi API đăng nhập với username/password đã lưu
- */
-export const autoLogin = async () => {
-  try {
-    // Kiểm tra xem có remember me không
-    const rememberMe = await AsyncStorage.getItem(REMEMBER_ME_KEY);
-    if (rememberMe !== 'true') {
-      console.log('Remember me is not enabled, skip auto login');
-      return { success: false, token: null, userData: null };
-    }
-
-    // Lấy username và password đã lưu
-    const savedUsername = await getSavedUsername();
-    const savedPassword = await getSavedPassword();
-
-    if (!savedUsername || !savedPassword) {
-      console.log('No saved credentials found, skip auto login');
-      return { success: false, token: null, userData: null };
-    }
-
-    console.log('Attempting auto login with saved credentials...');
-
-    // Gọi API đăng nhập
-    const apiUrl = getApiUrl(API_ENDPOINTS.LOGIN);
-    const response = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        username: savedUsername,
-        password: savedPassword,
-      }),
-    });
-
-    if (!response.ok) {
-      console.log('Auto login failed: API response not ok');
-      // Nếu đăng nhập thất bại, xóa thông tin đã lưu
-      await clearSavedCredentials();
-      return { success: false, token: null, userData: null };
-    }
-
-    const data = await response.json();
-    console.log('Auto login API response:', data);
-
-    if (data.status === 200 && data.data) {
-      // Đăng nhập thành công
-      const {userId, tokens} = data.data;
-      const {accessToken, refreshToken, expiresIn} = tokens;
-
-      // Lưu thông tin đăng nhập
-      const userData = {
-        userId: userId,
-        username: savedUsername,
-      };
-
-      // Lưu thông tin đăng nhập (remember me vẫn là true)
-      const saved = await saveAuthData(
-        accessToken,
-        userData,
-        refreshToken,
-        expiresIn,
-        true // remember me
-      );
-
-      if (saved) {
-        console.log('Auto login successful');
-        return { success: true, token: accessToken, userData: userData };
-      } else {
-        console.log('Auto login failed: Could not save auth data');
-        return { success: false, token: null, userData: null };
-      }
-    } else {
-      // Đăng nhập thất bại
-      console.log('Auto login failed: Invalid response data');
-      await clearSavedCredentials();
-      return { success: false, token: null, userData: null };
-    }
-  } catch (error) {
-    console.error('Error in auto login:', error);
-    // Không xóa credentials khi có lỗi network, có thể thử lại sau
-    return { success: false, token: null, userData: null };
-  }
-};
-
-/**
  * Kiểm tra xem user đã đăng nhập chưa
  */
 export const isAuthenticated = async () => {
@@ -348,33 +261,6 @@ export const getSavedUsername = async () => {
 };
 
 /**
- * Lưu password khi remember me được chọn
- * Lưu ý: Lưu password dạng plaintext không an toàn, nhưng phục vụ cho tính năng auto login
- */
-export const savePassword = async (password) => {
-  try {
-    await AsyncStorage.setItem(SAVED_PASSWORD_KEY, password);
-    return true;
-  } catch (error) {
-    console.error('Error saving password:', error);
-    return false;
-  }
-};
-
-/**
- * Lấy password đã lưu
- */
-export const getSavedPassword = async () => {
-  try {
-    const password = await AsyncStorage.getItem(SAVED_PASSWORD_KEY);
-    return password;
-  } catch (error) {
-    console.error('Error getting saved password:', error);
-    return null;
-  }
-};
-
-/**
  * Xóa username đã lưu
  */
 export const clearSavedUsername = async () => {
@@ -388,25 +274,17 @@ export const clearSavedUsername = async () => {
 };
 
 /**
- * Xóa password đã lưu
- */
-export const clearSavedPassword = async () => {
-  try {
-    await AsyncStorage.removeItem(SAVED_PASSWORD_KEY);
-    return true;
-  } catch (error) {
-    console.error('Error clearing saved password:', error);
-    return false;
-  }
-};
-
-/**
- * Xóa tất cả thông tin đăng nhập đã lưu (username và password)
+ * Xóa tất cả thông tin đăng nhập đã lưu (username)
  */
 export const clearSavedCredentials = async () => {
   try {
     await clearSavedUsername();
-    await clearSavedPassword();
+    // Xóa password nếu có (từ phiên bản cũ)
+    try {
+      await AsyncStorage.removeItem(SAVED_PASSWORD_KEY);
+    } catch (e) {
+      // Ignore error if key doesn't exist
+    }
     return true;
   } catch (error) {
     console.error('Error clearing saved credentials:', error);

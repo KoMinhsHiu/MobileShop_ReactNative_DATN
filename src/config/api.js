@@ -41,6 +41,7 @@ export const API_ENDPOINTS = {
   VNPAY_MOBILE_CALLBACK: '/api/v1/payments/vnpay/mobile/callback',
   AI_CHAT: '/api/v1/ai/chat',
   SHIPMENT_FEE: '/api/v1/shipment/fee',
+  GET_VOUCHERS_LIST: '/api/v1/vouchers/list',
   // Thêm các endpoints khác ở đây
 };
 

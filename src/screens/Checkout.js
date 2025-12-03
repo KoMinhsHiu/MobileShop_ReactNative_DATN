@@ -53,6 +53,8 @@ const Checkout = () => {
     street: '',
     note: '',
     paymentMethod: '', // Will be set after loading payment methods from API
+    voucherIdsApplied: [], // Array of voucher IDs
+    pointUsed: 0, // Number of points to use
   });
 
   // Options
@@ -67,7 +69,17 @@ const Checkout = () => {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showAddressModal, setShowAddressModal] = useState(false);
   const [showAddAddressModal, setShowAddAddressModal] = useState(false);
+  const [showVoucherModal, setShowVoucherModal] = useState(false);
   const [isSelectingForNewAddress, setIsSelectingForNewAddress] = useState(false);
+
+  // Vouchers
+  const [vouchers, setVouchers] = useState([]);
+  const [loadingVouchers, setLoadingVouchers] = useState(false);
+  const [selectedVouchers, setSelectedVouchers] = useState([]);
+  
+  // Customer points
+  const [customerPoints, setCustomerPoints] = useState(0);
+  const [loadingCustomerPoints, setLoadingCustomerPoints] = useState(false);
 
   // Payment methods from API
   const [paymentMethods, setPaymentMethods] = useState([]);
@@ -911,6 +923,322 @@ const Checkout = () => {
       paymentMethod: methodId,
     }));
     setShowPaymentModal(false);
+  };
+
+  /**
+   * Load customer points
+   */
+  const loadCustomerPoints = async () => {
+    try {
+      setLoadingCustomerPoints(true);
+      const token = await getAuthToken();
+      if (!token) {
+        setLoadingCustomerPoints(false);
+        return;
+      }
+
+      const apiUrl = getApiUrl(API_ENDPOINTS.GET_CUSTOMER_ME);
+      const response = await fetch(apiUrl, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      const result = await response.json();
+
+      if (result.status === 200 && result.data) {
+        /**
+         * Get points from customer data
+         * Adjust field name based on your API response structure
+         */
+        const points = result.data.points || result.data.point || 0;
+        setCustomerPoints(points);
+      }
+    } catch (error) {
+      console.error('[Checkout] Error loading customer points:', error);
+    } finally {
+      setLoadingCustomerPoints(false);
+    }
+  };
+
+  /**
+   * Load available vouchers
+   * Public endpoint - no authentication required
+   */
+  const loadVouchers = async () => {
+    try {
+      setLoadingVouchers(true);
+      
+      /**
+       * Build URL with query parameters
+       */
+      const apiUrl = getApiUrl(API_ENDPOINTS.GET_VOUCHERS_LIST);
+      const queryParams = new URLSearchParams({
+        page: '1',
+        limit: '100', // Get all available vouchers (max 100)
+        order: 'asc',
+      });
+      const fullUrl = `${apiUrl}?${queryParams.toString()}`;
+      
+      /**
+       * Timeout 10 seconds as per API spec
+       */
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      const response = await fetch(fullUrl, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      const result = await response.json();
+      
+      console.log('[Checkout] Voucher API response status:', result.status || result.statusCode);
+      console.log('[Checkout] Response OK:', response.ok);
+
+      /**
+       * Handle different response structures
+       */
+      let vouchersData = null;
+      
+      /**
+       * Case 1: Response has status: 200 and nested data.data (actual structure from API)
+       */
+      if ((result.status === 200 || result.statusCode === 200) && result.data && result.data.data && Array.isArray(result.data.data)) {
+        vouchersData = result.data.data;
+        console.log('[Checkout] ✅ Found vouchers in result.data.data');
+      }
+      /**
+       * Case 2: Response has statusCode and data is array directly
+       */
+      else if ((result.status === 200 || result.statusCode === 200) && result.data && Array.isArray(result.data)) {
+        vouchersData = result.data;
+        console.log('[Checkout] ✅ Found vouchers in result.data (array)');
+      }
+      /**
+       * Case 3: Response is array directly (no wrapper)
+       */
+      else if (Array.isArray(result)) {
+        vouchersData = result;
+        console.log('[Checkout] ✅ Found vouchers in result (array directly)');
+      }
+      /**
+       * Case 4: Response has data array directly (no status/statusCode)
+       */
+      else if (result.data && Array.isArray(result.data)) {
+        vouchersData = result.data;
+        console.log('[Checkout] ✅ Found vouchers in result.data (no status)');
+      }
+      
+      if (vouchersData && Array.isArray(vouchersData)) {
+        console.log('[Checkout] vouchersData length:', vouchersData.length);
+        /**
+         * Only filter out deleted vouchers
+         * Show all vouchers, but disable those that don't meet conditions
+         */
+        const allVouchers = vouchersData.filter(v => !v.isDeleted);
+        console.log('[Checkout] After filtering deleted:', allVouchers.length, 'vouchers');
+        console.log('[Checkout] Setting vouchers state...');
+        setVouchers(allVouchers);
+        console.log('[Checkout] ✅ Loaded vouchers:', allVouchers.length, 'vouchers');
+        console.log('[Checkout] Voucher IDs:', allVouchers.map(v => v.id));
+      } else {
+        console.warn('[Checkout] ❌ Failed to load vouchers - invalid response structure');
+        console.warn('[Checkout] Response keys:', Object.keys(result));
+        console.warn('[Checkout] result.status:', result.status);
+        console.warn('[Checkout] result.statusCode:', result.statusCode);
+        console.warn('[Checkout] result.data type:', typeof result.data);
+        console.warn('[Checkout] result.data is array:', Array.isArray(result.data));
+        if (result.data) {
+          console.warn('[Checkout] result.data keys:', Object.keys(result.data));
+          console.warn('[Checkout] result.data.data type:', typeof result.data.data);
+          console.warn('[Checkout] result.data.data is array:', Array.isArray(result.data.data));
+        }
+        setVouchers([]);
+      }
+    } catch (error) {
+      console.error('[Checkout] Error loading vouchers:', error);
+      
+      if (error.name === 'AbortError') {
+        console.warn('[Checkout] Voucher loading timeout (10s exceeded)');
+      }
+      
+      /**
+       * If API fails, set empty array (vouchers are optional)
+       */
+      setVouchers([]);
+    } finally {
+      setLoadingVouchers(false);
+    }
+  };
+
+  /**
+   * Check if voucher is applicable based on current order conditions
+   */
+  const checkVoucherApplicable = (voucher) => {
+    const reasons = [];
+    const now = new Date();
+    
+    /**
+     * Check start date
+     */
+    if (voucher.startDate) {
+      const startDate = new Date(voucher.startDate);
+      if (now < startDate) {
+        reasons.push('Chưa đến thời gian áp dụng');
+        return { applicable: false, reasons };
+      }
+    }
+    
+    /**
+     * Check end date
+     */
+    if (voucher.endDate) {
+      const endDate = new Date(voucher.endDate);
+      if (now > endDate) {
+        reasons.push('Đã hết hạn');
+        return { applicable: false, reasons };
+      }
+    }
+    
+    /**
+     * Check usage limit
+     */
+    if (voucher.usageLimit && voucher.usedCount >= voucher.usageLimit) {
+      reasons.push('Đã hết lượt sử dụng');
+      return { applicable: false, reasons };
+    }
+    
+    /**
+     * Check min order value
+     */
+    const orderTotal = calculateTotal();
+    if (voucher.minOrderValue && orderTotal < voucher.minOrderValue) {
+      reasons.push(`Đơn tối thiểu ${voucher.minOrderValue.toLocaleString('vi-VN')}đ`);
+      return { applicable: false, reasons };
+    }
+    
+    /**
+     * Check payment method if appliesTo === "payment_method"
+     */
+    if (voucher.appliesTo === 'payment_method' && voucher.paymentMethods && voucher.paymentMethods.length > 0) {
+      const selectedPayment = paymentMethods.find(m => m.id === formData.paymentMethod);
+      if (!selectedPayment) {
+        reasons.push('Chưa chọn phương thức thanh toán');
+        return { applicable: false, reasons };
+      }
+      
+      const applicablePaymentCodes = voucher.paymentMethods
+        .map(pm => pm.paymentMethod?.code)
+        .filter(Boolean);
+      
+      if (applicablePaymentCodes.length > 0 && !applicablePaymentCodes.includes(selectedPayment.code)) {
+        const paymentNames = voucher.paymentMethods
+          .map(pm => pm.paymentMethod?.name || pm.paymentMethod?.code)
+          .filter(Boolean);
+        reasons.push(`Chỉ áp dụng cho ${paymentNames.join(', ')}`);
+        return { applicable: false, reasons };
+      }
+    }
+    
+    /**
+     * Check category if appliesTo === "category"
+     */
+    if (voucher.appliesTo === 'category' && voucher.categories && voucher.categories.length > 0) {
+      /**
+       * Get category IDs from voucher
+       */
+      const voucherCategoryIds = voucher.categories
+        .map(c => c.category?.id)
+        .filter(id => id !== null && id !== undefined);
+      
+      if (voucherCategoryIds.length > 0) {
+        /**
+         * Check if any product in basket has matching category
+         */
+        let hasMatchingCategory = false;
+        const basketCategoryIds = [];
+        
+        basket.forEach(item => {
+          /**
+           * Try to get category from various possible locations
+           */
+          const categoryId = item.product?.categoryId ||
+                            item.product?.category?.id ||
+                            item.product?.variantData?.phone?.category?.id ||
+                            item.product?.phone?.category?.id ||
+                            null;
+          
+          if (categoryId) {
+            basketCategoryIds.push(categoryId);
+            if (voucherCategoryIds.includes(categoryId)) {
+              hasMatchingCategory = true;
+            }
+          }
+        });
+        
+        if (!hasMatchingCategory) {
+          const categoryNames = voucher.categories
+            .map(c => c.category?.name)
+            .filter(Boolean);
+          reasons.push(`Chỉ áp dụng cho sản phẩm ${categoryNames.join(', ')}`);
+          return { applicable: false, reasons };
+        }
+      }
+    }
+    
+    /**
+     * Check appliesTo === "all" - no additional restrictions
+     */
+    if (voucher.appliesTo === 'all') {
+      /**
+       * No category or payment method restrictions
+       */
+    }
+    
+    return { applicable: true, reasons: [] };
+  };
+
+  /**
+   * Handle voucher selection
+   */
+  const handleVoucherSelect = (voucher) => {
+    /**
+     * Check if voucher is applicable
+     */
+    const { applicable } = checkVoucherApplicable(voucher);
+    if (!applicable) {
+      return; // Don't allow selection if not applicable
+    }
+    
+    const isSelected = selectedVouchers.some(v => v.id === voucher.id);
+    
+    if (isSelected) {
+      /**
+       * Remove voucher
+       */
+      setSelectedVouchers(prev => prev.filter(v => v.id !== voucher.id));
+      setFormData(prev => ({
+        ...prev,
+        voucherIdsApplied: prev.voucherIdsApplied.filter(id => id !== voucher.id),
+      }));
+    } else {
+      /**
+       * Add voucher
+       */
+      setSelectedVouchers(prev => [...prev, voucher]);
+      setFormData(prev => ({
+        ...prev,
+        voucherIdsApplied: [...prev.voucherIdsApplied, voucher.id],
+      }));
+    }
   };
 
   /**
@@ -1986,6 +2314,7 @@ const Checkout = () => {
         loadProvinces(),
         loadPaymentMethods(),
         loadCustomerAddresses(),
+        loadCustomerPoints(),
       ]);
       // Fetch customer info after addresses (as fallback)
       await fetchCustomerInfo();
@@ -1993,6 +2322,45 @@ const Checkout = () => {
     initialize();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /**
+   * Load vouchers when voucher modal is opened
+   */
+  useEffect(() => {
+    if (showVoucherModal) {
+      /**
+       * Reset vouchers and load fresh data when modal opens
+       */
+      setVouchers([]);
+      loadVouchers();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showVoucherModal]);
+
+  /**
+   * Re-check selected vouchers when payment method or order total changes
+   * Remove vouchers that are no longer applicable
+   */
+  useEffect(() => {
+    if (selectedVouchers.length > 0) {
+      const stillApplicable = selectedVouchers.filter(voucher => {
+        const { applicable } = checkVoucherApplicable(voucher);
+        return applicable;
+      });
+      
+      if (stillApplicable.length !== selectedVouchers.length) {
+        /**
+         * Some vouchers are no longer applicable, remove them
+         */
+        setSelectedVouchers(stillApplicable);
+        setFormData(prev => ({
+          ...prev,
+          voucherIdsApplied: stillApplicable.map(v => v.id),
+        }));
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.paymentMethod, basket]);
 
   if (loading) {
     return (
@@ -2112,12 +2480,37 @@ const Checkout = () => {
                       )}
                     </View>
                   </View>
+                  {(selectedVouchers.length > 0 || formData.pointUsed > 0) && (
+                    <>
+                      {selectedVouchers.length > 0 && (
+                        <View style={tw`flex-row justify-between items-center mb-2`}>
+                          <Text style={tw`text-gray-700`}>Voucher đã chọn:</Text>
+                          <Text style={tw`text-green-600 font-medium`}>
+                            -{selectedVouchers.length} voucher
+                          </Text>
+                        </View>
+                      )}
+                      {formData.pointUsed > 0 && (
+                        <View style={tw`flex-row justify-between items-center mb-2`}>
+                          <Text style={tw`text-gray-700`}>Điểm đã sử dụng:</Text>
+                          <Text style={tw`text-green-600 font-medium`}>
+                            -{formData.pointUsed.toLocaleString('vi-VN')} điểm
+                          </Text>
+                        </View>
+                      )}
+                    </>
+                  )}
                   <View style={tw`flex-row justify-between items-center pt-2 border-t border-gray-300 mt-2`}>
                     <Text style={tw`text-lg font-bold text-gray-800`}>Tổng cộng:</Text>
                     <Text style={tw`text-xl font-bold text-red-600`}>
                       {calculateFinalAmount().toLocaleString('vi-VN')}đ
                     </Text>
                   </View>
+                  {(selectedVouchers.length > 0 || formData.pointUsed > 0) && (
+                    <Text style={tw`text-gray-500 text-xs mt-1 italic text-right`}>
+                      * Voucher và điểm sẽ được áp dụng khi đặt hàng
+                    </Text>
+                  )}
                 </View>
               </View>
             </View>
@@ -2191,6 +2584,67 @@ const Checkout = () => {
                     multiline
                     numberOfLines={3}
                   />
+                </View>
+              </View>
+            </View>
+
+            {/* Voucher and Points Section */}
+            <View style={tw`bg-white rounded-lg mb-4 shadow-sm`}>
+              <View style={tw`p-4 border-b border-gray-100`}>
+                <Text style={tw`text-lg font-bold text-gray-800`}>Voucher & Điểm</Text>
+              </View>
+              <View style={tw`p-4`}>
+                {/* Voucher Selection */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>Chọn voucher</Text>
+                  <Pressable
+                    style={tw`border border-gray-300 rounded-lg p-3 flex-row justify-between items-center`}
+                    onPress={() => setShowVoucherModal(true)}
+                  >
+                    <View style={tw`flex-1`}>
+                      {selectedVouchers.length > 0 ? (
+                        <Text style={tw`text-gray-800 font-medium`}>
+                          Đã chọn {selectedVouchers.length} voucher
+                        </Text>
+                      ) : (
+                        <Text style={tw`text-gray-400`}>Chọn voucher (tùy chọn)</Text>
+                      )}
+                    </View>
+                    <Icon name="chevron-forward" type="ionicon" size={20} color="#666" />
+                  </Pressable>
+                </View>
+
+                {/* Points Input */}
+                <View style={tw`mb-4`}>
+                  <Text style={tw`text-gray-700 font-medium mb-2`}>
+                    Sử dụng điểm {customerPoints > 0 && `(Có ${customerPoints.toLocaleString('vi-VN')} điểm)`}
+                  </Text>
+                  <TextInput
+                    style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
+                    value={formData.pointUsed > 0 ? formData.pointUsed.toString() : ''}
+                    onChangeText={(text) => {
+                      /**
+                       * Only allow numbers
+                       */
+                      const numericValue = text.replace(/[^0-9]/g, '');
+                      const pointValue = numericValue ? parseInt(numericValue, 10) : 0;
+                      
+                      /**
+                       * Validate: cannot exceed available points
+                       */
+                      const maxPoints = customerPoints || 0;
+                      const finalValue = pointValue > maxPoints ? maxPoints : pointValue;
+                      
+                      setFormData((prev) => ({ ...prev, pointUsed: finalValue }));
+                    }}
+                    placeholder="Nhập số điểm muốn sử dụng"
+                    keyboardType="numeric"
+                  />
+                  {formData.pointUsed > 0 && (
+                    <Text style={tw`text-gray-500 text-sm mt-1`}>
+                      Sẽ sử dụng {formData.pointUsed.toLocaleString('vi-VN')} điểm
+                    </Text>
+                  )}
                 </View>
               </View>
             </View>
@@ -2643,6 +3097,152 @@ const Checkout = () => {
                     </Pressable>
                   ))
                 )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+        {/* Voucher Selection Modal */}
+        <Modal
+          visible={showVoucherModal}
+          animationType="slide"
+          transparent={true}
+          onRequestClose={() => setShowVoucherModal(false)}
+        >
+          <View style={tw`flex-1 bg-black bg-opacity-50 justify-end`}>
+            <View style={tw`bg-white rounded-t-3xl max-h-96`}>
+              <View style={tw`p-4 border-b border-gray-200 flex-row justify-between items-center`}>
+                <Text style={tw`text-lg font-bold text-gray-800`}>Chọn voucher</Text>
+                <Pressable onPress={() => setShowVoucherModal(false)}>
+                  <Icon name="close" type="ionicon" size={24} color="#666" />
+                </Pressable>
+              </View>
+              <ScrollView style={tw`max-h-80`}>
+                {(() => {
+                  console.log('[Checkout] Voucher Modal Render - loadingVouchers:', loadingVouchers);
+                  console.log('[Checkout] Voucher Modal Render - vouchers.length:', vouchers.length);
+                  console.log('[Checkout] Voucher Modal Render - vouchers:', vouchers.map(v => ({ id: v.id, code: v.code })));
+                  
+                  if (loadingVouchers) {
+                    return (
+                      <View style={tw`p-8 items-center`}>
+                        <ActivityIndicator size="large" color="#2563eb" />
+                        <Text style={tw`text-gray-600 mt-2`}>Đang tải voucher...</Text>
+                      </View>
+                    );
+                  }
+                  
+                  if (vouchers.length === 0) {
+                    return (
+                      <View style={tw`p-8 items-center`}>
+                        <Text style={tw`text-gray-500 text-center`}>
+                          Không có voucher khả dụng
+                        </Text>
+                      </View>
+                    );
+                  }
+                  
+                  return (
+                  <>
+                    {vouchers.map((voucher) => {
+                      const isSelected = selectedVouchers.some(v => v.id === voucher.id);
+                      const { applicable, reasons } = checkVoucherApplicable(voucher);
+                      
+                      /**
+                       * Format discount display based on discountType
+                       */
+                      const getDiscountText = () => {
+                        if (voucher.discountType === 'amount' && voucher.discountValue) {
+                          return `Giảm ${voucher.discountValue.toLocaleString('vi-VN')}đ`;
+                        } else if (voucher.discountType === 'percent' && voucher.discountValue) {
+                          return `Giảm ${voucher.discountValue}%`;
+                        }
+                        return 'Có giảm giá';
+                      };
+                      
+                      /**
+                       * Get min order value text
+                       */
+                      const getMinOrderText = () => {
+                        if (voucher.minOrderValue) {
+                          return `Đơn tối thiểu: ${voucher.minOrderValue.toLocaleString('vi-VN')}đ`;
+                        }
+                        return null;
+                      };
+                      
+                      return (
+                        <Pressable
+                          key={voucher.id}
+                          style={tw`p-4 border-b border-gray-100 ${isSelected ? 'bg-blue-50' : ''} ${!applicable ? 'opacity-50' : ''}`}
+                          onPress={() => handleVoucherSelect(voucher)}
+                          disabled={!applicable}
+                        >
+                          <View style={tw`flex-row items-start justify-between`}>
+                            <View style={tw`flex-1`}>
+                              <View style={tw`flex-row items-center mb-1`}>
+                                <Text style={tw`text-gray-800 font-bold text-base ${!applicable ? 'text-gray-400' : ''}`}>
+                                  {voucher.title || voucher.code || `Voucher #${voucher.id}`}
+                                </Text>
+                                {voucher.code && (
+                                  <Text style={tw`text-gray-500 text-xs ml-2 ${!applicable ? 'text-gray-300' : ''}`}>
+                                    ({voucher.code})
+                                  </Text>
+                                )}
+                              </View>
+                              {voucher.description && (
+                                <Text style={tw`text-gray-600 text-sm mb-2 ${!applicable ? 'text-gray-400' : ''}`} numberOfLines={2}>
+                                  {voucher.description}
+                                </Text>
+                              )}
+                              <View style={tw`flex-row items-center flex-wrap mb-1`}>
+                                <Text style={tw`text-green-600 text-sm font-medium mr-3 ${!applicable ? 'text-gray-400' : ''}`}>
+                                  {getDiscountText()}
+                                </Text>
+                                {getMinOrderText() && (
+                                  <Text style={tw`text-gray-500 text-xs ${!applicable ? 'text-gray-300' : ''}`}>
+                                    {getMinOrderText()}
+                                  </Text>
+                                )}
+                              </View>
+                              {voucher.appliesTo === 'payment_method' && voucher.paymentMethods && voucher.paymentMethods.length > 0 && (
+                                <Text style={tw`text-gray-500 text-xs mb-1 ${!applicable ? 'text-gray-300' : ''}`}>
+                                  Áp dụng cho: {voucher.paymentMethods.map(pm => pm.paymentMethod?.name || pm.paymentMethod?.code).filter(Boolean).join(', ')}
+                                </Text>
+                              )}
+                              {!applicable && reasons.length > 0 && (
+                                <View style={tw`mt-1 bg-red-50 px-2 py-1 rounded`}>
+                                  <Text style={tw`text-red-600 text-xs`}>
+                                    {reasons.join(', ')}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            {isSelected && applicable && (
+                              <Icon name="checkmark-circle" type="ionicon" size={24} color="#2563eb" style={tw`ml-2`} />
+                            )}
+                            {!applicable && (
+                              <Icon name="close-circle" type="ionicon" size={24} color="#ef4444" style={tw`ml-2`} />
+                            )}
+                          </View>
+                        </Pressable>
+                      );
+                    })}
+                    {selectedVouchers.length > 0 && (
+                      <Pressable
+                        style={tw`p-4 border-t border-gray-200 bg-gray-50`}
+                        onPress={() => {
+                          setSelectedVouchers([]);
+                          setFormData(prev => ({ ...prev, voucherIdsApplied: [] }));
+                        }}
+                      >
+                        <Text style={tw`text-red-600 text-center font-medium`}>
+                          Bỏ chọn tất cả
+                        </Text>
+                      </Pressable>
+                    )}
+                  </>
+                  );
+                })()}
               </ScrollView>
             </View>
           </View>

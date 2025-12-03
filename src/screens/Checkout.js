@@ -267,10 +267,96 @@ const Checkout = () => {
   };
 
   /**
-   * Calculate final amount including shipping fee
+   * Calculate voucher discount
+   * Supports both 'amount' and 'percent' discount types
+   * IMPORTANT: Discount is calculated based on product total ONLY (not including shipping fee)
+   * - For 'amount': Fixed discount amount (cannot exceed product total)
+   * - For 'percent': Percentage discount based on product total
+   * - Applies max_discount_value limit if present (for percentage discounts)
+   */
+  const calculateVoucherDiscount = () => {
+    if (selectedVouchers.length === 0) {
+      return 0;
+    }
+    
+    // Only use the first voucher (only 1 voucher allowed)
+    const voucher = selectedVouchers[0];
+    
+    // Calculate discount based on product total ONLY (not including shipping fee)
+    const productTotal = calculateTotal(); // This is sum of all product prices, excluding shipping
+    
+    let discount = 0;
+    
+    if (voucher.discountType === 'amount' && voucher.discountValue) {
+      // Fixed amount discount - cannot exceed product total
+      discount = Math.min(voucher.discountValue, productTotal);
+    } else if (voucher.discountType === 'percent' && voucher.discountValue) {
+      // Percentage discount - calculated from product total only
+      // Example: 5% discount on 1,000,000đ product total = 50,000đ discount
+      discount = Math.floor(productTotal * (voucher.discountValue / 100));
+      
+      // Apply max_discount_value limit if present
+      // Check multiple possible field names for max discount value
+      const maxDiscountValue = voucher.max_discount_value ||
+                               voucher.maxDiscountValue ||
+                               voucher.maxDiscount ||
+                               voucher.maxDiscountAmount ||
+                               null;
+      
+      if (maxDiscountValue && maxDiscountValue > 0) {
+        // Limit discount to max_discount_value
+        discount = Math.min(discount, maxDiscountValue);
+      }
+    }
+    
+    // Final check: discount cannot exceed product total
+    return Math.min(discount, productTotal);
+  };
+
+  /**
+   * Calculate maximum discount from points
+   * Maximum discount = 10% of order total
+   */
+  const calculateMaxPointDiscount = () => {
+    const orderTotal = calculateTotal();
+    return Math.floor(orderTotal * 0.1); // 10% of order total
+  };
+
+  /**
+   * Calculate maximum points that can be used
+   * Based on maximum discount (10% of order total)
+   * 1 point = 50 VND
+   */
+  const calculateMaxPoints = () => {
+    const maxDiscount = calculateMaxPointDiscount();
+    return Math.floor(maxDiscount / 50); // Max points = max discount / 50
+  };
+
+  /**
+   * Calculate point discount
+   * 1 point = 50 VND
+   * Maximum discount = 10% of order total
+   */
+  const calculatePointDiscount = () => {
+    if (formData.pointUsed <= 0) {
+      return 0;
+    }
+    
+    const discountFromPoints = formData.pointUsed * 50; // 1 point = 50 VND
+    const maxDiscount = calculateMaxPointDiscount(); // 10% of order total
+    
+    return Math.min(discountFromPoints, maxDiscount);
+  };
+
+  /**
+   * Calculate final amount including shipping fee, voucher discount, and point discount
    */
   const calculateFinalAmount = () => {
-    return calculateTotal() + getShippingFee();
+    const subtotal = calculateTotal();
+    const shipping = getShippingFee();
+    const voucherDiscount = calculateVoucherDiscount();
+    const pointDiscount = calculatePointDiscount();
+    return subtotal + shipping - voucherDiscount - pointDiscount;
   };
 
   // Fetch customer addresses from API
@@ -759,6 +845,20 @@ const Checkout = () => {
         const customerData = result.data;
         const userData = customerData.user || {};
         
+        /**
+         * Get points from customer data
+         * Try multiple possible field names, prioritize pointsBalance (with 's')
+         */
+        const points = customerData.pointsBalance ||
+                      customerData.pointBalance ||
+                      customerData.points || 
+                      customerData.point || 
+                      customerData.customerPoints ||
+                      customerData.totalPoints ||
+                      0;
+        setCustomerPoints(points);
+        console.log('[Checkout] Customer points from fetchCustomerInfo:', points, 'from customerData:', customerData);
+        
         // Only pre-fill if no address is selected
         if (!selectedAddress) {
           setFormData((prev) => ({
@@ -951,10 +1051,17 @@ const Checkout = () => {
       if (result.status === 200 && result.data) {
         /**
          * Get points from customer data
-         * Adjust field name based on your API response structure
+         * Try multiple possible field names, prioritize pointsBalance (with 's')
          */
-        const points = result.data.points || result.data.point || 0;
+        const points = result.data.pointsBalance ||
+                      result.data.pointBalance ||
+                      result.data.points || 
+                      result.data.point || 
+                      result.data.customerPoints ||
+                      result.data.totalPoints ||
+                      0;
         setCustomerPoints(points);
+        console.log('[Checkout] Customer points loaded:', points, 'from data:', result.data);
       }
     } catch (error) {
       console.error('[Checkout] Error loading customer points:', error);
@@ -964,35 +1071,52 @@ const Checkout = () => {
   };
 
   /**
-   * Load available vouchers
+   * Load available vouchers for current basket variants
    * Public endpoint - no authentication required
+   * POST /api/v1/vouchers/variants with variantIds
    */
   const loadVouchers = async () => {
     try {
       setLoadingVouchers(true);
       
       /**
-       * Build URL with query parameters
+       * Extract variant IDs from basket
        */
-      const apiUrl = getApiUrl(API_ENDPOINTS.GET_VOUCHERS_LIST);
-      const queryParams = new URLSearchParams({
-        page: '1',
-        limit: '100', // Get all available vouchers (max 100)
-        order: 'asc',
-      });
-      const fullUrl = `${apiUrl}?${queryParams.toString()}`;
+      const variantIds = basket
+        .map(item => {
+          // Try to get variantId from various possible locations
+          return item.product?.variantId ||
+                 item.product?.id ||
+                 item.product?.variantData?.id ||
+                 item.id ||
+                 null;
+        })
+        .filter(id => id !== null && id !== undefined);
+      
+      if (variantIds.length === 0) {
+        console.warn('[Checkout] No variant IDs found in basket, cannot load vouchers');
+        setVouchers([]);
+        return;
+      }
+      
+      console.log('[Checkout] Loading vouchers for variants:', variantIds);
+      
+      const apiUrl = getApiUrl(API_ENDPOINTS.GET_VOUCHERS_BY_VARIANTS);
       
       /**
-       * Timeout 10 seconds as per API spec
+       * Timeout 30 seconds as per API spec (higher because it calls multiple services)
        */
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
       
-      const response = await fetch(fullUrl, {
-        method: 'GET',
+      const response = await fetch(apiUrl, {
+        method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          variantIds: variantIds,
+        }),
         signal: controller.signal,
       });
 
@@ -1000,47 +1124,30 @@ const Checkout = () => {
 
       const result = await response.json();
       
-      console.log('[Checkout] Voucher API response status:', result.status || result.statusCode);
+      console.log('[Checkout] Voucher API response status:', result.statusCode || result.status);
       console.log('[Checkout] Response OK:', response.ok);
 
       /**
-       * Handle different response structures
+       * Handle response structure: { statusCode: 200, message: "...", data: [...] }
        */
       let vouchersData = null;
       
-      /**
-       * Case 1: Response has status: 200 and nested data.data (actual structure from API)
-       */
-      if ((result.status === 200 || result.statusCode === 200) && result.data && result.data.data && Array.isArray(result.data.data)) {
-        vouchersData = result.data.data;
-        console.log('[Checkout] ✅ Found vouchers in result.data.data');
-      }
-      /**
-       * Case 2: Response has statusCode and data is array directly
-       */
-      else if ((result.status === 200 || result.statusCode === 200) && result.data && Array.isArray(result.data)) {
+      if ((result.statusCode === 200 || result.status === 200) && result.data && Array.isArray(result.data)) {
         vouchersData = result.data;
         console.log('[Checkout] ✅ Found vouchers in result.data (array)');
-      }
-      /**
-       * Case 3: Response is array directly (no wrapper)
-       */
-      else if (Array.isArray(result)) {
+      } else if (Array.isArray(result)) {
+        // Fallback: response is array directly
         vouchersData = result;
         console.log('[Checkout] ✅ Found vouchers in result (array directly)');
-      }
-      /**
-       * Case 4: Response has data array directly (no status/statusCode)
-       */
-      else if (result.data && Array.isArray(result.data)) {
+      } else if (result.data && Array.isArray(result.data)) {
         vouchersData = result.data;
-        console.log('[Checkout] ✅ Found vouchers in result.data (no status)');
+        console.log('[Checkout] ✅ Found vouchers in result.data (no statusCode)');
       }
       
       if (vouchersData && Array.isArray(vouchersData)) {
         console.log('[Checkout] vouchersData length:', vouchersData.length);
         /**
-         * Only filter out deleted vouchers
+         * Filter out deleted vouchers (API should already do this, but double-check)
          * Show all vouchers, but disable those that don't meet conditions
          */
         const allVouchers = vouchersData.filter(v => !v.isDeleted);
@@ -1052,22 +1159,17 @@ const Checkout = () => {
       } else {
         console.warn('[Checkout] ❌ Failed to load vouchers - invalid response structure');
         console.warn('[Checkout] Response keys:', Object.keys(result));
-        console.warn('[Checkout] result.status:', result.status);
         console.warn('[Checkout] result.statusCode:', result.statusCode);
+        console.warn('[Checkout] result.status:', result.status);
         console.warn('[Checkout] result.data type:', typeof result.data);
         console.warn('[Checkout] result.data is array:', Array.isArray(result.data));
-        if (result.data) {
-          console.warn('[Checkout] result.data keys:', Object.keys(result.data));
-          console.warn('[Checkout] result.data.data type:', typeof result.data.data);
-          console.warn('[Checkout] result.data.data is array:', Array.isArray(result.data.data));
-        }
         setVouchers([]);
       }
     } catch (error) {
       console.error('[Checkout] Error loading vouchers:', error);
       
       if (error.name === 'AbortError') {
-        console.warn('[Checkout] Voucher loading timeout (10s exceeded)');
+        console.warn('[Checkout] Voucher loading timeout (30s exceeded)');
       }
       
       /**
@@ -1081,40 +1183,11 @@ const Checkout = () => {
 
   /**
    * Check if voucher is applicable based on current order conditions
+   * Only checks: min_order_value and payment_method
+   * (Category, date, usage limit are handled by API)
    */
   const checkVoucherApplicable = (voucher) => {
     const reasons = [];
-    const now = new Date();
-    
-    /**
-     * Check start date
-     */
-    if (voucher.startDate) {
-      const startDate = new Date(voucher.startDate);
-      if (now < startDate) {
-        reasons.push('Chưa đến thời gian áp dụng');
-        return { applicable: false, reasons };
-      }
-    }
-    
-    /**
-     * Check end date
-     */
-    if (voucher.endDate) {
-      const endDate = new Date(voucher.endDate);
-      if (now > endDate) {
-        reasons.push('Đã hết hạn');
-        return { applicable: false, reasons };
-      }
-    }
-    
-    /**
-     * Check usage limit
-     */
-    if (voucher.usageLimit && voucher.usedCount >= voucher.usageLimit) {
-      reasons.push('Đã hết lượt sử dụng');
-      return { applicable: false, reasons };
-    }
     
     /**
      * Check min order value
@@ -1149,65 +1222,15 @@ const Checkout = () => {
     }
     
     /**
-     * Check category if appliesTo === "category"
+     * All checks passed
+     * Note: Category, date, usage limit are already filtered by API
      */
-    if (voucher.appliesTo === 'category' && voucher.categories && voucher.categories.length > 0) {
-      /**
-       * Get category IDs from voucher
-       */
-      const voucherCategoryIds = voucher.categories
-        .map(c => c.category?.id)
-        .filter(id => id !== null && id !== undefined);
-      
-      if (voucherCategoryIds.length > 0) {
-        /**
-         * Check if any product in basket has matching category
-         */
-        let hasMatchingCategory = false;
-        const basketCategoryIds = [];
-        
-        basket.forEach(item => {
-          /**
-           * Try to get category from various possible locations
-           */
-          const categoryId = item.product?.categoryId ||
-                            item.product?.category?.id ||
-                            item.product?.variantData?.phone?.category?.id ||
-                            item.product?.phone?.category?.id ||
-                            null;
-          
-          if (categoryId) {
-            basketCategoryIds.push(categoryId);
-            if (voucherCategoryIds.includes(categoryId)) {
-              hasMatchingCategory = true;
-            }
-          }
-        });
-        
-        if (!hasMatchingCategory) {
-          const categoryNames = voucher.categories
-            .map(c => c.category?.name)
-            .filter(Boolean);
-          reasons.push(`Chỉ áp dụng cho sản phẩm ${categoryNames.join(', ')}`);
-          return { applicable: false, reasons };
-        }
-      }
-    }
-    
-    /**
-     * Check appliesTo === "all" - no additional restrictions
-     */
-    if (voucher.appliesTo === 'all') {
-      /**
-       * No category or payment method restrictions
-       */
-    }
-    
     return { applicable: true, reasons: [] };
   };
 
   /**
    * Handle voucher selection
+   * Only allows selecting 1 voucher at a time
    */
   const handleVoucherSelect = (voucher) => {
     /**
@@ -1224,19 +1247,19 @@ const Checkout = () => {
       /**
        * Remove voucher
        */
-      setSelectedVouchers(prev => prev.filter(v => v.id !== voucher.id));
+      setSelectedVouchers([]);
       setFormData(prev => ({
         ...prev,
-        voucherIdsApplied: prev.voucherIdsApplied.filter(id => id !== voucher.id),
+        voucherIdsApplied: [],
       }));
     } else {
       /**
-       * Add voucher
+       * Replace current voucher with new one (only 1 voucher allowed)
        */
-      setSelectedVouchers(prev => [...prev, voucher]);
+      setSelectedVouchers([voucher]);
       setFormData(prev => ({
         ...prev,
-        voucherIdsApplied: [...prev.voucherIdsApplied, voucher.id],
+        voucherIdsApplied: [voucher.id],
       }));
     }
   };
@@ -2484,17 +2507,17 @@ const Checkout = () => {
                     <>
                       {selectedVouchers.length > 0 && (
                         <View style={tw`flex-row justify-between items-center mb-2`}>
-                          <Text style={tw`text-gray-700`}>Voucher đã chọn:</Text>
+                          <Text style={tw`text-gray-700`}>Giảm giá từ voucher:</Text>
                           <Text style={tw`text-green-600 font-medium`}>
-                            -{selectedVouchers.length} voucher
+                            -{calculateVoucherDiscount().toLocaleString('vi-VN')}đ
                           </Text>
                         </View>
                       )}
                       {formData.pointUsed > 0 && (
                         <View style={tw`flex-row justify-between items-center mb-2`}>
-                          <Text style={tw`text-gray-700`}>Điểm đã sử dụng:</Text>
+                          <Text style={tw`text-gray-700`}>Giảm giá từ điểm:</Text>
                           <Text style={tw`text-green-600 font-medium`}>
-                            -{formData.pointUsed.toLocaleString('vi-VN')} điểm
+                            -{calculatePointDiscount().toLocaleString('vi-VN')}đ
                           </Text>
                         </View>
                       )}
@@ -2603,9 +2626,14 @@ const Checkout = () => {
                   >
                     <View style={tw`flex-1`}>
                       {selectedVouchers.length > 0 ? (
-                        <Text style={tw`text-gray-800 font-medium`}>
-                          Đã chọn {selectedVouchers.length} voucher
-                        </Text>
+                        <View>
+                          <Text style={tw`text-gray-800 font-medium`}>
+                            {selectedVouchers[0].title || selectedVouchers[0].code || `Voucher #${selectedVouchers[0].id}`}
+                          </Text>
+                          <Text style={tw`text-green-600 text-sm`}>
+                            Giảm {calculateVoucherDiscount().toLocaleString('vi-VN')}đ
+                          </Text>
+                        </View>
                       ) : (
                         <Text style={tw`text-gray-400`}>Chọn voucher (tùy chọn)</Text>
                       )}
@@ -2616,9 +2644,21 @@ const Checkout = () => {
 
                 {/* Points Input */}
                 <View style={tw`mb-4`}>
-                  <Text style={tw`text-gray-700 font-medium mb-2`}>
-                    Sử dụng điểm {customerPoints > 0 && `(Có ${customerPoints.toLocaleString('vi-VN')} điểm)`}
-                  </Text>
+                  <View style={tw`flex-row items-center justify-between mb-2`}>
+                    <Text style={tw`text-gray-700 font-medium`}>
+                      Sử dụng điểm
+                    </Text>
+                    {loadingCustomerPoints ? (
+                      <View style={tw`flex-row items-center`}>
+                        <ActivityIndicator size="small" color="#2563eb" style={tw`mr-1`} />
+                        <Text style={tw`text-gray-500 text-sm`}>Đang tải...</Text>
+                      </View>
+                    ) : (
+                      <Text style={tw`text-blue-600 font-bold`}>
+                        {customerPoints.toLocaleString('vi-VN')} điểm
+                      </Text>
+                    )}
+                  </View>
                   <TextInput
                     style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
                     value={formData.pointUsed > 0 ? formData.pointUsed.toString() : ''}
@@ -2633,16 +2673,52 @@ const Checkout = () => {
                        * Validate: cannot exceed available points
                        */
                       const maxPoints = customerPoints || 0;
-                      const finalValue = pointValue > maxPoints ? maxPoints : pointValue;
+                      let finalValue = pointValue > maxPoints ? maxPoints : pointValue;
+                      
+                      /**
+                       * Validate: discount cannot exceed 10% of order total
+                       * 1 point = 50 VND
+                       * Max discount = 10% of order total
+                       */
+                      if (finalValue > 0) {
+                        const orderTotal = calculateTotal();
+                        const maxDiscount = Math.floor(orderTotal * 0.1); // 10% of order total
+                        const maxPointsByDiscount = Math.floor(maxDiscount / 50); // Max points based on 10% limit
+                        finalValue = Math.min(finalValue, maxPointsByDiscount);
+                      }
                       
                       setFormData((prev) => ({ ...prev, pointUsed: finalValue }));
                     }}
                     placeholder="Nhập số điểm muốn sử dụng"
                     keyboardType="numeric"
+                    editable={!loadingCustomerPoints && customerPoints > 0}
                   />
                   {formData.pointUsed > 0 && (
-                    <Text style={tw`text-gray-500 text-sm mt-1`}>
-                      Sẽ sử dụng {formData.pointUsed.toLocaleString('vi-VN')} điểm
+                    <View style={tw`mt-1`}>
+                      <Text style={tw`text-gray-500 text-sm`}>
+                        Sẽ sử dụng {formData.pointUsed.toLocaleString('vi-VN')} điểm
+                        {customerPoints > 0 && (
+                          <Text style={tw`text-gray-400`}>
+                            {' '}(Còn lại {((customerPoints || 0) - formData.pointUsed).toLocaleString('vi-VN')} điểm)
+                          </Text>
+                        )}
+                      </Text>
+                      <Text style={tw`text-green-600 text-sm font-medium mt-1`}>
+                        Giảm giá: {calculatePointDiscount().toLocaleString('vi-VN')}đ
+                      </Text>
+                      <Text style={tw`text-gray-500 text-xs mt-1`}>
+                        Tối đa {calculateMaxPoints().toLocaleString('vi-VN')} điểm ({calculateMaxPointDiscount().toLocaleString('vi-VN')}đ)
+                      </Text>
+                    </View>
+                  )}
+                  {customerPoints === 0 && !loadingCustomerPoints && (
+                    <Text style={tw`text-gray-400 text-sm mt-1 italic`}>
+                      Bạn chưa có điểm nào
+                    </Text>
+                  )}
+                  {customerPoints > 0 && !loadingCustomerPoints && (
+                    <Text style={tw`text-gray-400 text-xs mt-1 italic`}>
+                      Tối đa {calculateMaxPoints().toLocaleString('vi-VN')} điểm ({calculateMaxPointDiscount().toLocaleString('vi-VN')}đ)
                     </Text>
                   )}
                 </View>
@@ -3236,7 +3312,7 @@ const Checkout = () => {
                         }}
                       >
                         <Text style={tw`text-red-600 text-center font-medium`}>
-                          Bỏ chọn tất cả
+                          Bỏ chọn voucher
                         </Text>
                       </Pressable>
                     )}

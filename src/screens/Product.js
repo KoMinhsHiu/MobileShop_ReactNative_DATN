@@ -442,6 +442,14 @@ const Product = ({ route, navigation }) => {
         return;
       }
 
+      // Get category ID from product data
+      const categoryId = product.variantData?.phone?.category?.id ||
+                        product.variantData?.phone?.categoryId ||
+                        product.variantData?.category?.id ||
+                        product.variantData?.categoryId ||
+                        product.categoryId ||
+                        null;
+      
       // Tạo item để gửi đến Checkout (format giống basket item)
       const checkoutItem = {
         id: product.id, // variantId
@@ -454,8 +462,17 @@ const Product = ({ route, navigation }) => {
           amount: amount,
           variantId: product.id,
           colorId: selectedColor,
+          categoryId: categoryId, // Lưu categoryId để check voucher
+          variantData: product.variantData, // Lưu toàn bộ variantData để có thể truy cập category sau này
         }
       };
+      
+      console.log('[Product] Buy Now - checkoutItem with category:', {
+        productId: product.id,
+        categoryId: categoryId,
+        hasVariantData: !!product.variantData,
+        variantDataKeys: product.variantData ? Object.keys(product.variantData) : [],
+      });
 
       // Navigate đến Checkout với source='product'
       navigation.navigate('CheckoutScreen', {

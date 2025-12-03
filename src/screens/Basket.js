@@ -108,6 +108,13 @@ const Basket = ({ navigation }) => {
             // console.warn(`Item ${item.id}: colorId is NULL - all checks failed`);
           }
           
+          // Get category ID from variant.phone.category if available
+          const categoryId = variant.phone?.category?.id ||
+                            variant.phone?.categoryId ||
+                            variant.category?.id ||
+                            variant.categoryId ||
+                            null;
+          
           return {
             id: item.id, // Cart item ID
             product: {
@@ -120,6 +127,8 @@ const Basket = ({ navigation }) => {
               variantId: variant.id,
               colorId: colorId, // Lưu colorId từ API response
               cartItemId: item.id, // Keep cart item ID for update/delete operations
+              categoryId: categoryId, // Lưu categoryId để check voucher
+              variantData: variant, // Lưu toàn bộ variant data để có thể truy cập category sau này
             }
           };
         });

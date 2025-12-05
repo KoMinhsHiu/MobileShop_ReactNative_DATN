@@ -1,4 +1,4 @@
-import { Image, Pressable, TouchableOpacity, View } from 'react-native';
+import { Image, Pressable, View } from 'react-native';
 import React from 'react';
 import tw from 'tailwind-react-native-classnames';
 import ThemeText from '../ThemeText';
@@ -77,7 +77,7 @@ const ProductGridItem = ({ data, onProductPress, ...props }) => {
           )}
         </View>
 
-        {/* Bottom Section - Price and Buy Button */}
+        {/* Bottom Section - Price */}
         <View style={styles.bottomSection}>
           <View style={styles.priceContainer}>
             <ThemeText
@@ -94,21 +94,6 @@ const ProductGridItem = ({ data, onProductPress, ...props }) => {
               </ThemeText>
             )}
           </View>
-
-          <TouchableOpacity
-            style={styles.buyButton}
-            onPress={() => {
-              // Handle buy action
-              console.log('Buy product:', data.id);
-            }}
-          >
-            <ThemeText
-              weight={600}
-              style={styles.buyButtonText}
-            >
-              Mua ngay
-            </ThemeText>
-          </TouchableOpacity>
         </View>
       </View>
     </Pressable>
@@ -174,7 +159,6 @@ const styles = {
   priceContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: SPACING.sm,
   },
   priceText: {
     fontSize: TYPOGRAPHY.sizes.md,
@@ -185,16 +169,6 @@ const styles = {
     color: '#9ca3af', // Light gray for white background
     textDecorationLine: 'line-through',
     marginLeft: SPACING.xs,
-  },
-  buyButton: {
-    backgroundColor: COLORS.cta.secondary,
-    borderRadius: BORDER_RADIUS.md,
-    paddingVertical: SPACING.sm,
-    alignItems: 'center',
-  },
-  buyButtonText: {
-    color: COLORS.cta.text,
-    fontSize: TYPOGRAPHY.sizes.sm,
   },
 };
 

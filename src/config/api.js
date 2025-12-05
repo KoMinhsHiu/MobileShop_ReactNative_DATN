@@ -36,12 +36,7 @@ export const API_ENDPOINTS = {
   UPDATE_CUSTOMER_ADDRESS: '/api/v1/customers/addresses/update', // Will append /:addressId
   DELETE_CUSTOMER_ADDRESS: '/api/v1/customers/addresses/delete', // Will append /:addressId
   GET_PAYMENT_METHODS: '/api/v1/payments/methods',
-  CREATE_ORDER: '/api/v1/orders/create',
-  VNPAY_MOBILE_CREATE: '/api/v1/payments/vnpay/mobile/create',
-  VNPAY_MOBILE_CALLBACK: '/api/v1/payments/vnpay/mobile/callback',
   AI_CHAT: '/api/v1/ai/chat',
-  SHIPMENT_FEE: '/api/v1/shipment/fee',
-  GET_VOUCHERS_BY_VARIANTS: '/api/v1/vouchers/variants',
   // Thêm các endpoints khác ở đây
 };
 

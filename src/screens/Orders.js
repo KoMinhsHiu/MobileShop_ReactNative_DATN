@@ -142,16 +142,24 @@ const Orders = ({navigation}) => {
     loadOrders();
   }, []);
 
+  /**
+   * Handle view order detail
+   * API mới chỉ hỗ trợ orderId, không hỗ trợ orderCode
+   */
   const handleViewDetail = (order) => {
-    // Lấy orderCode từ order (có thể là orderCode hoặc orderId)
-    const orderCode = order.orderCode || order.orderId || order.id;
+    /**
+     * Lấy orderId từ order (ưu tiên orderId, sau đó id)
+     */
+    const orderId = order.id || order.orderId;
     
-    if (orderCode) {
-      // Navigate đến màn hình chi tiết đơn hàng với orderCode
-      navigation.navigate('OrderDetailScreen', { orderCode: orderCode });
+    if (orderId) {
+      /**
+       * Navigate đến màn hình chi tiết đơn hàng với orderId
+       */
+      navigation.navigate('OrderDetailScreen', { orderId: orderId });
     } else {
-      console.error('Order code not found:', order);
-      Alert.alert('Lỗi', 'Không tìm thấy mã đơn hàng');
+      console.error('Order ID not found:', order);
+      Alert.alert('Lỗi', 'Không tìm thấy ID đơn hàng');
     }
   };
 

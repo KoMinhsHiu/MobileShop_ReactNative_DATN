@@ -145,17 +145,17 @@ const UserPanel = () => {
   const saveChanges = () => {
     setUserInfo({ ...editForm });
     setIsEditModalVisible(false);
-    Alert.alert('Success', 'Profile updated successfully!');
+    Alert.alert('Thành công', 'Cập nhật hồ sơ thành công!');
   };
 
   const changeAvatar = () => {
     Alert.alert(
-      'Change Avatar',
-      'Choose an option',
+      'Đổi ảnh đại diện',
+      'Chọn một tùy chọn',
       [
-        { text: 'Camera', onPress: () => console.log('Camera') },
-        { text: 'Gallery', onPress: () => console.log('Gallery') },
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Máy ảnh', onPress: () => console.log('Camera') },
+        { text: 'Thư viện', onPress: () => console.log('Gallery') },
+        { text: 'Hủy', style: 'cancel' },
       ]
     );
   };
@@ -238,7 +238,7 @@ const UserPanel = () => {
     <View style={tw`bg-white rounded-lg mb-4 shadow-sm`}>
       <View style={tw`p-4 border-b border-gray-100`}>
         <Text style={tw`text-lg font-bold text-gray-800`}>
-          📋 Personal Information
+          📋 Thông tin cá nhân
         </Text>
       </View>
       
@@ -261,7 +261,7 @@ const UserPanel = () => {
             style={tw`mt-2 bg-gray-100 px-4 py-2 rounded-lg`}
             onPress={changeAvatar}
           >
-            <Text style={tw`text-gray-700 text-sm font-medium`}>Change Avatar</Text>
+            <Text style={tw`text-gray-700 text-sm font-medium`}>Đổi ảnh đại diện</Text>
           </Pressable>
         </View>
 
@@ -270,7 +270,7 @@ const UserPanel = () => {
           <View style={tw`flex-row items-center mb-4`}>
             <Icon name="person" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
             <View style={tw`flex-1`}>
-              <Text style={tw`text-gray-500 text-sm`}>Full Name</Text>
+              <Text style={tw`text-gray-500 text-sm`}>Họ và tên</Text>
               <Text style={tw`text-gray-800 font-medium`}>{userInfo.fullName}</Text>
             </View>
           </View>
@@ -286,7 +286,7 @@ const UserPanel = () => {
           <View style={tw`flex-row items-center mb-4`}>
             <Icon name="call" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
             <View style={tw`flex-1`}>
-              <Text style={tw`text-gray-500 text-sm`}>Phone Number</Text>
+              <Text style={tw`text-gray-500 text-sm`}>Số điện thoại</Text>
               <Text style={tw`text-gray-800 font-medium`}>{userInfo.phone}</Text>
             </View>
           </View>
@@ -295,7 +295,7 @@ const UserPanel = () => {
             <View style={tw`flex-row items-center mb-4`}>
               <Icon name="calendar" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
               <View style={tw`flex-1`}>
-                <Text style={tw`text-gray-500 text-sm`}>Date of Birth</Text>
+                <Text style={tw`text-gray-500 text-sm`}>Ngày sinh</Text>
                 <Text style={tw`text-gray-800 font-medium`}>{userInfo.dateOfBirth}</Text>
               </View>
             </View>
@@ -305,7 +305,7 @@ const UserPanel = () => {
             <View style={tw`flex-row items-center mb-4`}>
               <Icon name="people" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
               <View style={tw`flex-1`}>
-                <Text style={tw`text-gray-500 text-sm`}>Gender</Text>
+                <Text style={tw`text-gray-500 text-sm`}>Giới tính</Text>
                 <Text style={tw`text-gray-800 font-medium`}>{userInfo.gender}</Text>
               </View>
             </View>
@@ -315,7 +315,7 @@ const UserPanel = () => {
             <View style={tw`flex-row items-center`}>
               <Icon name="star" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
               <View style={tw`flex-1`}>
-                <Text style={tw`text-gray-500 text-sm`}>Point Balance</Text>
+                <Text style={tw`text-gray-500 text-sm`}>Số điểm</Text>
                 <Text style={tw`text-gray-800 font-medium`}>{userInfo.pointBalance}</Text>
               </View>
             </View>
@@ -325,7 +325,7 @@ const UserPanel = () => {
             <View style={tw`flex-row items-center`}>
               <Icon name="person-circle" type="ionicon" size={20} color="#666" style={tw`mr-3`} />
               <View style={tw`flex-1`}>
-                <Text style={tw`text-gray-500 text-sm`}>Username</Text>
+                <Text style={tw`text-gray-500 text-sm`}>Tên đăng nhập</Text>
                 <Text style={tw`text-gray-800 font-medium`}>{userInfo.username}</Text>
               </View>
             </View>
@@ -338,7 +338,7 @@ const UserPanel = () => {
           onPress={openEditModal}
         >
           <Text style={tw`text-white text-center font-bold`}>
-            ✏️ Edit Information
+            ✏️ Chỉnh sửa thông tin
           </Text>
         </Pressable>
       </View>
@@ -349,7 +349,7 @@ const UserPanel = () => {
     <View style={tw`bg-white rounded-lg mb-4 shadow-sm`}>
       <View style={tw`p-4 border-b border-gray-100`}>
         <Text style={tw`text-lg font-bold text-gray-800`}>
-          📦 Orders & Payment
+          📦 Đơn hàng & Thanh toán
         </Text>
       </View>
       
@@ -357,19 +357,19 @@ const UserPanel = () => {
         <View>
           <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="receipt" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
-            <Text style={tw`text-gray-800 font-medium flex-1`}>Order History</Text>
+            <Text style={tw`text-gray-800 font-medium flex-1`}>Lịch sử đơn hàng</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
           <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="card" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
-            <Text style={tw`text-gray-800 font-medium flex-1`}>Payment Methods</Text>
+            <Text style={tw`text-gray-800 font-medium flex-1`}>Phương thức thanh toán</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
           <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}>
             <Icon name="wallet" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
-            <Text style={tw`text-gray-800 font-medium flex-1`}>Wallet & Vouchers</Text>
+            <Text style={tw`text-gray-800 font-medium flex-1`}>Ví & Mã giảm giá</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
         </View>
@@ -381,7 +381,7 @@ const UserPanel = () => {
     <View style={tw`bg-white rounded-lg mb-4 shadow-sm`}>
       <View style={tw`p-4 border-b border-gray-100`}>
         <Text style={tw`text-lg font-bold text-gray-800`}>
-          ⚙️ Settings & Support
+          ⚙️ Cài đặt & Hỗ trợ
         </Text>
       </View>
       
@@ -389,13 +389,13 @@ const UserPanel = () => {
         <View>
           <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="notifications" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
-            <Text style={tw`text-gray-800 font-medium flex-1`}>Notifications</Text>
+            <Text style={tw`text-gray-800 font-medium flex-1`}>Thông báo</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
           <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg mb-3`}>
             <Icon name="shield-checkmark" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
-            <Text style={tw`text-gray-800 font-medium flex-1`}>Privacy & Security</Text>
+            <Text style={tw`text-gray-800 font-medium flex-1`}>Quyền riêng tư & Bảo mật</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
@@ -410,7 +410,7 @@ const UserPanel = () => {
 
           <Pressable style={tw`flex-row items-center p-3 bg-gray-50 rounded-lg`}>
             <Icon name="information-circle" type="ionicon" size={24} color="#666" style={tw`mr-3`} />
-            <Text style={tw`text-gray-800 font-medium flex-1`}>About App</Text>
+            <Text style={tw`text-gray-800 font-medium flex-1`}>Giới thiệu ứng dụng</Text>
             <Icon name="chevron-forward" type="ionicon" size={20} color="#999" />
           </Pressable>
 
@@ -425,7 +425,7 @@ const UserPanel = () => {
               <Icon name="log-out" type="ionicon" size={24} color="#dc2626" style={tw`mr-3`} />
             )}
             <Text style={tw`text-red-600 font-medium flex-1`}>
-              {logoutLoading ? 'Đang đăng xuất...' : 'Logout'}
+              {logoutLoading ? 'Đang đăng xuất...' : 'Đăng xuất'}
             </Text>
             {!logoutLoading && (
               <Icon name="chevron-forward" type="ionicon" size={20} color="#dc2626" />
@@ -686,11 +686,11 @@ const UserPanel = () => {
         {/* Header */}
         <View style={tw`flex-row items-center justify-between p-4 border-b border-gray-200`}>
           <Pressable onPress={closeEditModal}>
-            <Text style={tw`text-blue-600 font-medium`}>Cancel</Text>
+            <Text style={tw`text-blue-600 font-medium`}>Hủy</Text>
           </Pressable>
-          <Text style={tw`text-lg font-bold`}>Edit Profile</Text>
+          <Text style={tw`text-lg font-bold`}>Chỉnh sửa hồ sơ</Text>
           <Pressable onPress={saveChanges}>
-            <Text style={tw`text-blue-600 font-bold`}>Save</Text>
+            <Text style={tw`text-blue-600 font-bold`}>Lưu</Text>
           </Pressable>
         </View>
 
@@ -707,19 +707,19 @@ const UserPanel = () => {
               style={tw`bg-blue-600 px-6 py-3 rounded-lg`}
               onPress={changeAvatar}
             >
-              <Text style={tw`text-white font-medium`}>Change Avatar</Text>
+              <Text style={tw`text-white font-medium`}>Đổi ảnh đại diện</Text>
             </Pressable>
           </View>
 
           {/* Form Fields */}
           <View>
             <View style={tw`mb-4`}>
-              <Text style={tw`text-gray-700 font-medium mb-2`}>Full Name</Text>
+              <Text style={tw`text-gray-700 font-medium mb-2`}>Họ và tên</Text>
               <TextInput
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
                 value={editForm.fullName}
                 onChangeText={(text) => setEditForm({ ...editForm, fullName: text })}
-                placeholder="Enter your full name"
+                placeholder="Nhập họ và tên"
               />
             </View>
 
@@ -729,24 +729,24 @@ const UserPanel = () => {
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
                 value={editForm.email}
                 onChangeText={(text) => setEditForm({ ...editForm, email: text })}
-                placeholder="Enter your email"
+                placeholder="Nhập email"
                 keyboardType="email-address"
               />
             </View>
 
             <View style={tw`mb-4`}>
-              <Text style={tw`text-gray-700 font-medium mb-2`}>Phone Number</Text>
+              <Text style={tw`text-gray-700 font-medium mb-2`}>Số điện thoại</Text>
               <TextInput
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
                 value={editForm.phone}
                 onChangeText={(text) => setEditForm({ ...editForm, phone: text })}
-                placeholder="Enter your phone number"
+                placeholder="Nhập số điện thoại"
                 keyboardType="phone-pad"
               />
             </View>
 
             <View style={tw`mb-4`}>
-              <Text style={tw`text-gray-700 font-medium mb-2`}>Date of Birth (Optional)</Text>
+              <Text style={tw`text-gray-700 font-medium mb-2`}>Ngày sinh (Tùy chọn)</Text>
               <TextInput
                 style={tw`border border-gray-300 rounded-lg p-3 text-gray-800`}
                 value={editForm.dateOfBirth}
@@ -756,7 +756,7 @@ const UserPanel = () => {
             </View>
 
             <View>
-              <Text style={tw`text-gray-700 font-medium mb-2`}>Gender (Optional)</Text>
+              <Text style={tw`text-gray-700 font-medium mb-2`}>Giới tính (Tùy chọn)</Text>
               <View style={tw`flex-row`}>
                 <Pressable
                   style={tw`flex-row items-center flex-1 p-3 border rounded-lg mr-4 ${
@@ -770,7 +770,7 @@ const UserPanel = () => {
                     size={20}
                     color={editForm.gender === 'Male' ? '#2563eb' : '#999'}
                   />
-                  <Text style={tw`ml-2 text-gray-800`}>Male</Text>
+                  <Text style={tw`ml-2 text-gray-800`}>Nam</Text>
                 </Pressable>
 
                 <Pressable
@@ -785,7 +785,7 @@ const UserPanel = () => {
                     size={20}
                     color={editForm.gender === 'Female' ? '#2563eb' : '#999'}
                   />
-                  <Text style={tw`ml-2 text-gray-800`}>Female</Text>
+                  <Text style={tw`ml-2 text-gray-800`}>Nữ</Text>
                 </Pressable>
               </View>
             </View>
@@ -797,7 +797,7 @@ const UserPanel = () => {
             onPress={saveChanges}
           >
             <Text style={tw`text-white text-center font-bold text-lg`}>
-              Save Changes
+              Lưu thay đổi
             </Text>
           </Pressable>
         </ScrollView>
@@ -819,8 +819,8 @@ const UserPanel = () => {
             <View style={tw`p-4`}>
               {/* Header */}
               <View style={tw`mb-6`}>
-                <Text style={tw`text-2xl font-bold text-gray-800`}>Profile</Text>
-                <Text style={tw`text-gray-600 mt-1`}>Manage your account settings</Text>
+                <Text style={tw`text-2xl font-bold text-gray-800`}>Hồ sơ</Text>
+                <Text style={tw`text-gray-600 mt-1`}>Quản lý cài đặt tài khoản</Text>
               </View>
 
               {/* Sections */}

@@ -8,6 +8,7 @@ import {
   Alert,
   TouchableOpacity,
   StatusBar,
+  Image,
 } from 'react-native';
 import {SafeAreaView} from 'react-native-safe-area-context';
 import React, {useEffect, useState} from 'react';
@@ -46,7 +47,9 @@ const OrderDetail = ({route, navigation}) => {
     return `${amount.toLocaleString('vi-VN')} ₫`;
   };
 
-  // Lấy màu theo trạng thái
+  /**
+   * Lấy màu theo trạng thái
+   */
   const getStatusColor = (status) => {
     switch (status) {
       case 'delivered':
@@ -61,12 +64,16 @@ const OrderDetail = ({route, navigation}) => {
         return '#3b82f6'; // blue
       case 'processing':
         return '#8b5cf6'; // purple
+      case 'paid':
+        return '#10b981'; // green - đã thanh toán
       default:
         return '#6b7280'; // gray
     }
   };
 
-  // Map status từ API sang tiếng Việt
+  /**
+   * Map status từ API sang tiếng Việt
+   */
   const mapStatusToVietnamese = (status) => {
     const statusMap = {
       pending: 'Chờ xác nhận',
@@ -75,61 +82,86 @@ const OrderDetail = ({route, navigation}) => {
       shipping: 'Đang giao',
       delivered: 'Đã giao',
       cancelled: 'Đã hủy',
+      paid: 'Đã thanh toán',
     };
     return statusMap[status] || status;
   };
 
-  // Load chi tiết đơn hàng từ API
+  /**
+   * Load chi tiết đơn hàng từ API
+   * Sử dụng endpoint GET /v1/orders/{orderId}
+   */
   useEffect(() => {
     const loadOrderDetail = async () => {
       setLoading(true);
       setError(null);
       try {
-        // Lấy token từ AsyncStorage
-        const token = await getAuthToken();
-
-        if (!token) {
-          setError('Bạn cần đăng nhập để xem chi tiết đơn hàng');
-          setLoading(false);
-          return;
-        }
-
-        // Xác định API base URL
+        /**
+         * Xác định API base URL
+         */
         const API_URL = Platform.OS === 'android'
           ? 'http://10.0.2.2:3000'
           : 'http://localhost:3000';
 
-        // Gọi API để lấy chi tiết đơn hàng
-        // Thử dùng orderCode trước, nếu không có thì thử dùng orderId
-        let apiUrl;
-        if (orderCode) {
-          // Nếu có orderCode, dùng endpoint code
-          apiUrl = `${API_URL}/api/v1/orders/code/${orderCode}`;
-        } else if (orderId) {
-          // Nếu chỉ có orderId, thử dùng endpoint id
-          apiUrl = `${API_URL}/api/v1/orders/${orderId}`;
-        } else {
+        /**
+         * API mới chỉ hỗ trợ orderId, không hỗ trợ orderCode
+         * Nếu chỉ có orderCode, cần tìm orderId từ orderCode trước
+         */
+        let orderIdToUse = orderId;
+        
+        if (!orderIdToUse && orderCode) {
+          /**
+           * Nếu chỉ có orderCode, cần tìm orderId từ danh sách đơn hàng
+           * Hoặc có thể gọi API khác để lấy orderId từ orderCode
+           * Tạm thời báo lỗi nếu không có orderId
+           */
+          setError('Vui lòng sử dụng ID đơn hàng để xem chi tiết');
+          setLoading(false);
+          return;
+        }
+
+        if (!orderIdToUse) {
           setError('Mã đơn hàng không hợp lệ');
           setLoading(false);
           return;
         }
+
+        /**
+         * Gọi API GET /v1/orders/{orderId}
+         * API này không yêu cầu authentication nhưng vẫn gửi token để an toàn
+         */
+        const apiUrl = `${API_URL}/api/v1/orders/${orderIdToUse}`;
         
         console.log('[OrderDetail] Fetching order from:', apiUrl);
+        
+        const token = await getAuthToken();
+        const headers = {
+          'Content-Type': 'application/json',
+        };
+        
+        /**
+         * Thêm token nếu có (mặc dù API không yêu cầu)
+         */
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        
         const response = await fetch(apiUrl, {
-            method: 'GET',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-            },
+          method: 'GET',
+          headers: headers,
         });
 
         const result = await response.json();
 
-        // Xử lý kết quả
+        /**
+         * Xử lý kết quả
+         */
         if (result.status === 200 && result.data) {
           setOrder(result.data);
           
-          // Lấy tên tỉnh/thành phố và phường/xã
+          /**
+           * Lấy tên tỉnh/thành phố và phường/xã
+           */
           const names = await getLocationNames(result.data);
           setLocationNames(names);
         } else if (result.status === 404) {
@@ -239,6 +271,70 @@ const OrderDetail = ({route, navigation}) => {
             </Text>
           </View>
         </View>
+
+        {/* Danh sách sản phẩm */}
+        {order.items && order.items.length > 0 && (
+          <View style={tw`bg-white mx-4 my-2 rounded-lg shadow-sm border border-gray-200 p-4`}>
+            <Text style={tw`text-lg font-bold text-gray-900 mb-4`}>
+              Sản phẩm ({order.items.length})
+            </Text>
+            {order.items.map((item, index) => (
+              <View
+                key={item.id || index}
+                style={[
+                  tw`flex-row mb-4 pb-4`,
+                  index < order.items.length - 1 && tw`border-b border-gray-200`,
+                ]}>
+                {/* Hình ảnh sản phẩm */}
+                <Image
+                  source={{
+                    uri: item.variant?.imageUrl || 'https://via.placeholder.com/100',
+                  }}
+                  style={tw`w-20 h-20 rounded-lg bg-gray-100`}
+                  resizeMode="cover"
+                />
+                
+                {/* Thông tin sản phẩm */}
+                <View style={tw`flex-1 ml-3`}>
+                  <Text style={tw`text-base font-semibold text-gray-900 mb-1`} numberOfLines={2}>
+                    {item.variant?.name || 'N/A'}
+                  </Text>
+                  <Text style={tw`text-sm text-gray-600 mb-1`}>
+                    {item.variant?.variantName || ''}
+                  </Text>
+                  {item.variant?.color && (
+                    <View style={tw`flex-row items-center mb-2`}>
+                      <View
+                        style={[
+                          tw`w-4 h-4 rounded-full mr-2 border border-gray-300`,
+                          {backgroundColor: item.variant.color.toLowerCase()},
+                        ]}
+                      />
+                      <Text style={tw`text-sm text-gray-600`}>
+                        Màu: {item.variant.color}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={tw`flex-row justify-between items-center`}>
+                    <Text style={tw`text-sm text-gray-500`}>
+                      Số lượng: {item.quantity}
+                    </Text>
+                    <View style={tw`flex-row items-center`}>
+                      {item.discount && item.discount < item.price && (
+                        <Text style={tw`text-sm text-gray-400 line-through mr-2`}>
+                          {formatCurrency(item.price)}
+                        </Text>
+                      )}
+                      <Text style={tw`text-base font-semibold text-red-600`}>
+                        {formatCurrency(item.discount || item.price)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Thông tin người nhận */}
         <View style={tw`bg-white mx-4 my-2 rounded-lg shadow-sm border border-gray-200 p-4`}>

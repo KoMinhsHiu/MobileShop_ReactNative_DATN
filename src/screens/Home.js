@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   FlatList,
@@ -37,6 +37,8 @@ const Home = () => {
   // });
   const searchQuery = useSelector(selectSearchText);
   const navigation = useNavigation();
+  const searchDebounceRef = useRef(null);
+  const abortControllerRef = useRef(null);
 
   // Fetch phone variants from API
   useEffect(() => {
@@ -116,70 +118,170 @@ const Home = () => {
     setShowAll(true);
   };
 
-  // Filter products based on search and brand selection
+  /**
+   * Search với Elasticsearch API khi có search query
+   * Sử dụng AbortController để hủy request cũ khi có request mới
+   */
+  const searchWithElasticsearch = async (query) => {
+    /**
+     * Hủy request trước đó nếu có
+     */
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    /**
+     * Tạo AbortController mới
+     */
+    abortControllerRef.current = new AbortController();
+
+    try {
+      setLoading(true);
+      
+      /**
+       * Xác định API base URL
+       */
+      const API_BASE_URL = Platform.OS === 'android'
+        ? 'http://10.0.2.2:3000'
+        : 'http://localhost:3000';
+
+      /**
+       * Gọi API GET /api/v1/search?q={query}
+       */
+      const url = `${API_BASE_URL}/api/v1/search?q=${encodeURIComponent(query)}`;
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        signal: abortControllerRef.current.signal,
+      });
+
+      const result = await response.json();
+
+      /**
+       * Xử lý kết quả
+       */
+      if (result.status === 200 && result.data && result.data.phones) {
+        /**
+         * Transform phones từ API sang format cho ProductGridItem
+         */
+        const transformedProducts = result.data.phones.map((phone) => {
+          const originalPrice = phone.originalPrice || 0;
+          const discountPercent = phone.discountPercent || 0;
+          const finalPrice = discountPercent > 0 
+            ? originalPrice * (1 - discountPercent / 100)
+            : originalPrice;
+
+          return {
+            id: phone.id,
+            title: phone.name,
+            brand: '',
+            thumbnail: phone.imageUrl || 'https://via.placeholder.com/300',
+            price: finalPrice,
+            originalPrice: originalPrice,
+            discountPercentage: discountPercent,
+            rating: 0,
+            description: '',
+            variantData: null,
+          };
+        });
+
+        setFilteredProducts(transformedProducts);
+        setTotalItems(transformedProducts.length);
+      } else if (result.statusCode === 503) {
+        /**
+         * Service unavailable - hiển thị empty
+         */
+        setFilteredProducts([]);
+        setTotalItems(0);
+      } else {
+        /**
+         * Lỗi khác hoặc không có kết quả
+         */
+        setFilteredProducts([]);
+        setTotalItems(0);
+      }
+    } catch (error) {
+      /**
+       * Xử lý lỗi (có thể do abort hoặc network error)
+       */
+      if (error.name !== 'AbortError') {
+        console.error('Error searching with Elasticsearch:', error);
+        setFilteredProducts([]);
+        setTotalItems(0);
+      }
+    } finally {
+      setLoading(false);
+      abortControllerRef.current = null;
+    }
+  };
+
+  /**
+   * Filter products based on search and brand selection
+   * Nếu có search query, sử dụng Elasticsearch API với debounce 300ms
+   * Nếu không, filter local
+   */
   useEffect(() => {
-    let filtered = products;
-
-    // Filter by search query
-    if (searchQuery.length > 0) {
-      filtered = filtered.filter(product =>
-        product.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        product.description.toLowerCase().includes(searchQuery.toLowerCase())
-      );
+    /**
+     * Clear debounce timeout trước đó
+     */
+    if (searchDebounceRef.current) {
+      clearTimeout(searchDebounceRef.current);
     }
 
-    // Filter by selected brand
+    /**
+     * Nếu có search query, gọi API Elasticsearch sau 300ms (debounce)
+     */
+    if (searchQuery && searchQuery.length > 0) {
+      searchDebounceRef.current = setTimeout(() => {
+        searchWithElasticsearch(searchQuery);
+        setShowAll(false);
+      }, 300);
+      return;
+    }
+
+    /**
+     * Nếu không có search query, load lại products ban đầu hoặc filter local
+     */
+    if (products.length === 0 && !selectedBrand) {
+      /**
+       * Nếu không có products và không có brand filter, fetch lại
+       */
+      fetchPhoneVariants();
+    } else {
+      /**
+       * Filter local by selected brand
+       */
+      let filtered = products;
+
+      if (selectedBrand) {
+        filtered = filtered.filter(product => product.brand === selectedBrand);
+      }
+
+      setFilteredProducts(filtered);
+    }
+    
+    /**
+     * Reset showAll when filters change
+     */
     if (selectedBrand) {
-      filtered = filtered.filter(product => product.brand === selectedBrand);
-    }
-
-    // Tạm thời comment out filter logic
-    // // Filter by price range
-    // if (selectedFilters.price !== 'all') {
-    //   const priceRanges = {
-    //     'under-50': { min: 0, max: 50 },
-    //     '50-100': { min: 50, max: 100 },
-    //     '100-200': { min: 100, max: 200 },
-    //     '200-500': { min: 200, max: 500 },
-    //     'over-500': { min: 500, max: Infinity },
-    //   };
-    //   
-    //   if (priceRanges[selectedFilters.price]) {
-    //     const { min, max } = priceRanges[selectedFilters.price];
-    //     filtered = filtered.filter(product => product.price >= min && product.price <= max);
-    //   }
-    // }
-
-    // // Filter by category
-    // if (selectedFilters.category !== 'all') {
-    //   filtered = filtered.filter(product => product.category === selectedFilters.category);
-    // }
-
-    // // Filter by promotion
-    // if (selectedFilters.promotion !== 'all') {
-    //   switch (selectedFilters.promotion) {
-    //     case 'discount':
-    //       filtered = filtered.filter(product => product.discountPercentage > 0);
-    //       break;
-    //     case 'new':
-    //       filtered = filtered.filter(product => product.isNew === true);
-    //       break;
-    //     case 'bestseller':
-    //       filtered = filtered.filter(product => product.rating >= 4.5);
-    //       break;
-    //     case 'free-shipping':
-    //       filtered = filtered.filter(product => product.freeShipping === true);
-    //       break;
-    //   }
-    // }
-
-    setFilteredProducts(filtered);
-    // Reset showAll when filters change to show the button again if needed
-    if (searchQuery || selectedBrand) {
       setShowAll(false);
     }
-  }, [searchQuery, selectedBrand, products]); // Tạm thời bỏ selectedFilters
+
+    /**
+     * Cleanup debounce timeout
+     */
+    return () => {
+      if (searchDebounceRef.current) {
+        clearTimeout(searchDebounceRef.current);
+      }
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+    };
+  }, [searchQuery, selectedBrand, products]);
 
   const handleBrandSelect = async (brandName) => {
     // Nếu đang chọn cùng nhãn hàng, thì bỏ chọn và load lại tất cả

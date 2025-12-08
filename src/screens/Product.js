@@ -1,4 +1,4 @@
-import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View, Platform, Alert, Modal, Dimensions } from 'react-native';
+import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View, Platform, Alert, Modal, Dimensions, TextInput, KeyboardAvoidingView } from 'react-native';
 import React, { useEffect, useRef, useState } from 'react';
 import Wrapper from '../components/Wrapper/Wrapper';
 import tw from 'tailwind-react-native-classnames';
@@ -9,6 +9,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage"
 import { useDispatch } from 'react-redux';
 import { addToBasket, removeFromBasket } from '../store/slices/siteSlice';
 import { getAuthToken } from '../utils/auth';
+import { getApiUrl, API_ENDPOINTS } from '../config/api';
 
 const Product = ({ route, navigation }) => {
   const translateAnim = useRef(new Animated.Value(-10)).current;
@@ -23,6 +24,10 @@ const Product = ({ route, navigation }) => {
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
   const [relatedVariants, setRelatedVariants] = useState([]);
   const [loadingRelatedVariants, setLoadingRelatedVariants] = useState(false);
+  const [reviewModalVisible, setReviewModalVisible] = useState(false);
+  const [reviewRating, setReviewRating] = useState(0);
+  const [reviewComment, setReviewComment] = useState('');
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   // DEBUG: Log selectedColor changes
   useEffect(() => {
@@ -419,6 +424,84 @@ const Product = ({ route, navigation }) => {
     }
   };
 
+  /**
+   * Submit review cho sản phẩm
+   */
+  const submitReview = async () => {
+    if (reviewRating === 0) {
+      Alert.alert('Thông báo', 'Vui lòng chọn số sao đánh giá');
+      return;
+    }
+
+    if (!reviewComment.trim()) {
+      Alert.alert('Thông báo', 'Vui lòng nhập nội dung đánh giá');
+      return;
+    }
+
+    try {
+      setSubmittingReview(true);
+      const token = await getAuthToken();
+      
+      if (!token) {
+        Alert.alert('Cần đăng nhập', 'Vui lòng đăng nhập để viết đánh giá');
+        setReviewModalVisible(false);
+        return;
+      }
+
+      const API_BASE_URL = Platform.OS === 'android' 
+        ? 'http://10.0.2.2:3000'
+        : 'http://localhost:3000';
+
+      /**
+       * Gọi API POST /api/v1/reviews
+       */
+      const apiUrl = `${API_BASE_URL}/api/v1/reviews`;
+      
+      const requestBody = {
+        variantId: product.id,
+        rating: reviewRating,
+        comment: reviewComment.trim(),
+      };
+
+      console.log('[Review] Submitting review:', JSON.stringify(requestBody, null, 2));
+
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      const result = await response.json();
+
+      if (result.status === 200 || result.status === 201) {
+        Alert.alert('Thành công', 'Cảm ơn bạn đã đánh giá sản phẩm!');
+        
+        /**
+         * Reset form
+         */
+        setReviewRating(0);
+        setReviewComment('');
+        setReviewModalVisible(false);
+        
+        /**
+         * Refresh product data để cập nhật reviews
+         */
+        await fetchProduct();
+      } else {
+        const errorMessage = result.message || 'Không thể gửi đánh giá. Vui lòng thử lại.';
+        Alert.alert('Lỗi', errorMessage);
+      }
+    } catch (error) {
+      console.error('Error submitting review:', error);
+      Alert.alert('Lỗi', 'Không thể kết nối đến server. Vui lòng thử lại sau.');
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
+
   const buyNow = async () => {
     try {
       const token = await getAuthToken();
@@ -619,10 +702,41 @@ const Product = ({ route, navigation }) => {
                     )}
                     
                     {/* Reviews */}
-                    {product.reviews && product.reviews.length > 0 && (
-                      <View style={tw`my-4`}>
-                        <ThemeText weight={700} style={tw`text-lg text-black mb-3`}>Đánh giá ({product.reviews.length})</ThemeText>
-                        {product.reviews.map((review, index) => (
+                    <View style={tw`my-4`}>
+                      <View style={tw`flex-row items-center justify-between mb-3`}>
+                        <ThemeText weight={700} style={tw`text-lg text-black`}>
+                          Đánh giá {product.reviews && product.reviews.length > 0 ? `(${product.reviews.length})` : ''}
+                        </ThemeText>
+                        <Pressable
+                          style={tw`bg-blue-600 px-4 py-2 rounded-lg flex-row items-center`}
+                          onPress={async () => {
+                            const token = await getAuthToken();
+                            if (!token) {
+                              Alert.alert(
+                                'Cần đăng nhập',
+                                'Vui lòng đăng nhập để viết đánh giá',
+                                [
+                                  { text: 'Hủy', style: 'cancel' },
+                                  { 
+                                    text: 'Đăng nhập', 
+                                    onPress: () => navigation.navigate('LoginScreen') 
+                                  }
+                                ]
+                              );
+                              return;
+                            }
+                            setReviewRating(0);
+                            setReviewComment('');
+                            setReviewModalVisible(true);
+                          }}
+                        >
+                          <Icon name="create-outline" type="ionicon" size={16} color="white" style={tw`mr-1`} />
+                          <Text style={tw`text-white font-medium`}>Viết đánh giá</Text>
+                        </Pressable>
+                      </View>
+                      
+                      {product.reviews && product.reviews.length > 0 ? (
+                        product.reviews.map((review, index) => (
                           <View key={index} style={tw`bg-gray-50 rounded-lg p-3 mb-2`}>
                             <View style={tw`flex-row items-center mb-2`}>
                               {[...Array(5)].map((_, i) => (
@@ -642,9 +756,13 @@ const Product = ({ route, navigation }) => {
                               <ThemeText style={tw`text-gray-700`}>{review.comment}</ThemeText>
                             )}
                           </View>
-                        ))}
-                      </View>
-                    )}
+                        ))
+                      ) : (
+                        <View style={tw`bg-gray-50 rounded-lg p-4 items-center`}>
+                          <Text style={tw`text-gray-500`}>Chưa có đánh giá nào. Hãy là người đầu tiên đánh giá sản phẩm này!</Text>
+                        </View>
+                      )}
+                    </View>
 
                     {/* Related Variants */}
                     <View style={tw`my-4`}>
@@ -905,6 +1023,123 @@ const Product = ({ route, navigation }) => {
             </View>
           )}
         </View>
+      </Modal>
+
+      {/* Modal form đánh giá */}
+      <Modal
+        visible={reviewModalVisible}
+        animationType="slide"
+        transparent={false}
+        onRequestClose={() => {
+          if (!submittingReview) {
+            setReviewModalVisible(false);
+          }
+        }}
+      >
+        <KeyboardAvoidingView 
+          style={tw`flex-1`}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <View style={tw`flex-1 bg-white`}>
+            {/* Header */}
+            <View style={tw`flex-row items-center justify-between p-4 border-b border-gray-200 bg-blue-600`}>
+              <Text style={tw`text-white text-lg font-bold`}>Viết đánh giá</Text>
+              <Pressable
+                onPress={() => {
+                  if (!submittingReview) {
+                    setReviewModalVisible(false);
+                  }
+                }}
+                disabled={submittingReview}
+              >
+                <Icon name="close" type="ionicon" size={28} color="white" />
+              </Pressable>
+            </View>
+
+            {/* Form Content */}
+            <ScrollView style={tw`flex-1 p-4`}>
+              {/* Rating Section */}
+              <View style={tw`mb-6`}>
+                <Text style={tw`text-gray-700 font-medium mb-3`}>Đánh giá của bạn *</Text>
+                <View style={tw`flex-row items-center`}>
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <Pressable
+                      key={star}
+                      onPress={() => setReviewRating(star)}
+                      disabled={submittingReview}
+                      style={tw`mr-2`}
+                    >
+                      <Icon
+                        name="star"
+                        type="ionicon"
+                        size={40}
+                        color={star <= reviewRating ? "#FFD700" : "#E0E0E0"}
+                      />
+                    </Pressable>
+                  ))}
+                </View>
+                {reviewRating > 0 && (
+                  <Text style={tw`text-gray-600 mt-2 text-sm`}>
+                    {reviewRating === 1 && 'Rất tệ'}
+                    {reviewRating === 2 && 'Tệ'}
+                    {reviewRating === 3 && 'Bình thường'}
+                    {reviewRating === 4 && 'Tốt'}
+                    {reviewRating === 5 && 'Rất tốt'}
+                  </Text>
+                )}
+              </View>
+
+              {/* Comment Section */}
+              <View style={tw`mb-6`}>
+                <Text style={tw`text-gray-700 font-medium mb-3`}>Nội dung đánh giá *</Text>
+                <TextInput
+                  style={[
+                    tw`border border-gray-300 rounded-lg p-4 text-gray-800`,
+                    { minHeight: 128 }
+                  ]}
+                  placeholder="Chia sẻ trải nghiệm của bạn về sản phẩm này..."
+                  placeholderTextColor="#999"
+                  value={reviewComment}
+                  onChangeText={setReviewComment}
+                  multiline
+                  numberOfLines={6}
+                  textAlignVertical="top"
+                  editable={!submittingReview}
+                  maxLength={500}
+                />
+                <Text style={tw`text-gray-500 text-xs mt-2 text-right`}>
+                  {reviewComment.length}/500 ký tự
+                </Text>
+              </View>
+
+              {/* Product Info */}
+              <View style={tw`bg-gray-50 rounded-lg p-4 mb-6`}>
+                <Text style={tw`text-gray-600 text-sm mb-2`}>Sản phẩm đang đánh giá:</Text>
+                <Text style={tw`text-gray-800 font-medium`}>{product?.title}</Text>
+              </View>
+            </ScrollView>
+
+            {/* Submit Button */}
+            <View style={tw`border-t border-gray-200 p-4 bg-gray-50`}>
+              <Pressable
+                style={tw`bg-blue-600 rounded-lg p-4 items-center ${
+                  submittingReview || reviewRating === 0 || !reviewComment.trim() ? 'opacity-50' : ''
+                }`}
+                onPress={submitReview}
+                disabled={submittingReview || reviewRating === 0 || !reviewComment.trim()}
+              >
+                {submittingReview ? (
+                  <View style={tw`flex-row items-center`}>
+                    <ActivityIndicator size="small" color="white" style={tw`mr-2`} />
+                    <Text style={tw`text-white font-bold text-lg`}>Đang gửi...</Text>
+                  </View>
+                ) : (
+                  <Text style={tw`text-white font-bold text-lg`}>Gửi đánh giá</Text>
+                )}
+              </Pressable>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </Wrapper>
   );

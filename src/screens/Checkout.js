@@ -229,14 +229,44 @@ const Checkout = () => {
         shippingFee: result.data?.shippingFee,
       });
 
+      /**
+       * Xử lý response theo API spec
+       */
       if (result.status === 200 && result.data && result.data.shippingFee) {
+        /**
+         * Thành công - parse và set shipping fee
+         */
         const fee = parseShippingFee(result.data.shippingFee);
         setShippingFee(fee);
         setShippingFeeError(null);
         console.log('[Checkout] ✅ Shipping fee calculated:', fee.toLocaleString('vi-VN'), 'VND');
+      } else if (result.status === 400) {
+        /**
+         * Bad Request - thiếu tham số hoặc lỗi từ GHN API
+         */
+        const errorMessage = result.message || 'Thông tin địa chỉ không hợp lệ. Vui lòng kiểm tra lại.';
+        console.warn('[Checkout] ❌ Bad Request:', errorMessage);
+        setShippingFee(null);
+        setShippingFeeError(errorMessage);
+      } else if (result.status === 404) {
+        /**
+         * Not Found - không tìm thấy location
+         */
+        const errorMessage = result.message || 'Không tìm thấy địa chỉ. Vui lòng chọn lại tỉnh/thành phố và xã/phường.';
+        console.warn('[Checkout] ❌ Location not found:', errorMessage);
+        setShippingFee(null);
+        setShippingFeeError(errorMessage);
+      } else if (result.status === 503) {
+        /**
+         * Service Unavailable
+         */
+        const errorMessage = result.message || 'Dịch vụ tính phí vận chuyển tạm thời không khả dụng. Vui lòng thử lại sau.';
+        console.warn('[Checkout] ❌ Service Unavailable:', errorMessage);
+        setShippingFee(null);
+        setShippingFeeError(errorMessage);
       } else {
         /**
-         * Handle errors - don't set fee, let user know there's an issue
+         * Lỗi khác
          */
         const errorMessage = result.message || 'Không thể tính phí vận chuyển. Vui lòng thử lại.';
         console.warn('[Checkout] ❌ Failed to calculate shipping fee:', errorMessage);
@@ -2056,9 +2086,16 @@ const Checkout = () => {
       console.log('[Checkout] Response data:', JSON.stringify(result.data, null, 2));
       console.log('[Checkout] Response errors:', JSON.stringify(result.errors, null, 2));
 
-      // Xử lý response theo spec mới
-      if (result.status === 200 && result.data) {
-        // Response format: { status: 200, message: "Order created successfully", data: { orderId: 1 } }
+      /**
+       * Xử lý response theo API spec
+       * Response có thể dùng status hoặc statusCode
+       */
+      const responseStatus = result.status || result.statusCode;
+      
+      if (responseStatus === 200 && result.data && result.data.orderId) {
+        /**
+         * Thành công - Response format: { status: 200, message: "Order created successfully", data: { orderId: 1 } }
+         */
         const orderId = result.data.orderId;
         
         console.log('[Checkout] ========== ORDER CREATED ==========');
@@ -2286,27 +2323,57 @@ const Checkout = () => {
         }
         setSubmitting(false);
       } else {
-        // Handle errors theo spec
+        /**
+         * Xử lý lỗi theo API spec
+         * Response có thể dùng status hoặc statusCode
+         */
         let errorMessage = 'Đã xảy ra lỗi khi đặt hàng. Vui lòng thử lại.';
         
-        if (result.status === 400) {
-          // 400 Bad Request: Sản phẩm hết hàng, voucher không hợp lệ, giá trị đơn hàng tối thiểu không đạt
-          errorMessage = result.message || 'Một hoặc nhiều sản phẩm đã hết hàng.';
-        } else if (result.status === 503) {
-          // 503 Service Unavailable: Order service không khả dụng
+        if (responseStatus === 400 || response.status === 400) {
+          /**
+           * 400 Bad Request: Sản phẩm hết hàng, voucher không hợp lệ, giá trị đơn hàng tối thiểu không đạt, validation errors
+           */
+          errorMessage = result.message || 'Một hoặc nhiều sản phẩm đã hết hàng hoặc voucher không hợp lệ.';
+        } else if (responseStatus === 503 || response.status === 503) {
+          /**
+           * 503 Service Unavailable: Order service tạm thời không khả dụng
+           */
           errorMessage = result.message || 'Dịch vụ đặt hàng tạm thời không khả dụng. Vui lòng thử lại sau.';
-        } else if (result.status === 404) {
-          // 404 Not Found: Customer không tồn tại, Point configuration không tồn tại
-          errorMessage = result.message || 'Không tìm thấy thông tin khách hàng.';
+        } else if (responseStatus === 404 || response.status === 404) {
+          /**
+           * 404 Not Found: Customer không tồn tại, Point configuration không tồn tại
+           */
+          errorMessage = result.message || 'Không tìm thấy thông tin khách hàng hoặc cấu hình điểm thưởng.';
         } else if (result.message) {
           errorMessage = result.message;
         }
         
-        // Hiển thị chi tiết lỗi nếu có
-        if (result.errors && Array.isArray(result.errors) && result.errors.length > 0) {
-          const errorDetails = result.errors.map(e => e.message).join('\n');
-          errorMessage += '\n\n' + errorDetails;
+        /**
+         * Hiển thị chi tiết lỗi nếu có (từ result.errors)
+         */
+        if (result.errors) {
+          if (Array.isArray(result.errors) && result.errors.length > 0) {
+            const errorDetails = result.errors.map(e => e.message || e).join('\n');
+            errorMessage += '\n\n' + errorDetails;
+          } else if (typeof result.errors === 'object') {
+            /**
+             * Nếu errors là object, format thành string
+             */
+            const errorDetails = Object.entries(result.errors)
+              .map(([key, value]) => `${key}: ${value}`)
+              .join('\n');
+            if (errorDetails) {
+              errorMessage += '\n\n' + errorDetails;
+            }
+          }
         }
+        
+        console.error('[Checkout] ❌ Order creation failed:', {
+          status: responseStatus,
+          httpStatus: response.status,
+          message: errorMessage,
+          errors: result.errors,
+        });
         
         Alert.alert('Lỗi', errorMessage);
       }
@@ -2992,7 +3059,10 @@ const Checkout = () => {
           onRequestClose={() => setShowAddAddressModal(false)}
         >
           <View style={tw`flex-1 bg-black bg-opacity-50 justify-end`}>
-            <View style={tw`bg-white rounded-t-3xl max-h-5/6`}>
+            <View style={[
+              tw`bg-white rounded-t-3xl`,
+              { maxHeight: '83.333%' }
+            ]}>
               <View style={tw`p-4 border-b border-gray-200 flex-row justify-between items-center`}>
                 <Text style={tw`text-lg font-bold text-gray-800`}>
                   {editingAddressId ? 'Chỉnh sửa địa chỉ' : 'Thêm địa chỉ mới'}

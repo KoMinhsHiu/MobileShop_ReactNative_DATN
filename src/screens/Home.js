@@ -256,9 +256,9 @@ const Home = () => {
        */
       let filtered = products;
 
-      if (selectedBrand) {
-        filtered = filtered.filter(product => product.brand === selectedBrand);
-      }
+    if (selectedBrand) {
+      filtered = filtered.filter(product => product.brand === selectedBrand);
+    }
 
       setFilteredProducts(filtered);
     }

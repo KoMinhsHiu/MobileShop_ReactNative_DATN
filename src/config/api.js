@@ -37,6 +37,13 @@ export const API_ENDPOINTS = {
   DELETE_CUSTOMER_ADDRESS: '/api/v1/customers/addresses/delete', // Will append /:addressId
   GET_PAYMENT_METHODS: '/api/v1/payments/methods',
   AI_CHAT: '/api/v1/ai/chat',
+  CREATE_REVIEW: '/api/v1/reviews', // POST - Tạo đánh giá mới
+  SHIPMENT_FEE: '/api/v1/shipment/fee', // POST - Tính phí vận chuyển
+  GET_VOUCHERS_BY_VARIANTS: '/api/v1/vouchers/variants', // POST - Lấy vouchers theo variantIds
+  CREATE_ORDER: '/api/v1/orders/create', // POST - Tạo đơn hàng mới
+  VNPAY_MOBILE_CREATE: '/api/v1/payments/vnpay/mobile/create', // POST - Tạo VNPay payment URL cho mobile
+  COD_PAYMENT: '/api/v1/payments/cod', // POST - Tạo COD payment
+  CANCEL_ORDER: '/api/v1/orders/cancel', // POST - Hủy đơn hàng
   // Thêm các endpoints khác ở đây
 };
 

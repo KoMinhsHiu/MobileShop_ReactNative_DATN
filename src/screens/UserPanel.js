@@ -21,6 +21,7 @@ import { Icon } from 'react-native-elements';
 import tw from 'tailwind-react-native-classnames';
 import { clearAuthData, getAuthToken } from '../utils/auth';
 import { getApiUrl, API_ENDPOINTS } from '../config/api';
+import ChatMessageText from '../components/ChatMessageText/ChatMessageText';
 
 const UserPanel = () => {
   const navigation = useNavigation();
@@ -579,6 +580,7 @@ const UserPanel = () => {
                   } else if (data.role === 'Assistant' && data.content !== undefined) {
                     console.log('[Chat] Nhận tin nhắn Assistant, isPartial:', data.isPartial, 'content length:', data.content.length);
                     if (data.isPartial === false) {
+                      // Message hoàn chỉnh cuối cùng - set toàn bộ nội dung
                       accumulatedContent = data.content;
                       console.log('[Chat] Cập nhật nội dung đầy đủ:', accumulatedContent.substring(0, 100));
                       setMessages(prev => prev.map(msg => 
@@ -587,17 +589,20 @@ const UserPanel = () => {
                           : msg
                       ));
                     } else if (data.isPartial === true) {
+                      // Chunk trung gian (2-5 ký tự) - xử lý theo API mới
+                      // API mới: mỗi chunk partial có thể là:
+                      // 1. Chunk mới cần append (nếu content không chứa accumulatedContent)
+                      // 2. Toàn bộ nội dung hiện tại (nếu content chứa accumulatedContent)
                       const oldContent = accumulatedContent;
                       if (data.content.length >= accumulatedContent.length && 
                           data.content.startsWith(accumulatedContent)) {
+                        // Chunk chứa toàn bộ nội dung hiện tại + phần mới
                         accumulatedContent = data.content;
                         console.log('[Chat] Cập nhật toàn bộ nội dung (từ', oldContent.length, '->', accumulatedContent.length, 'ký tự)');
-                      } else if (data.content.length < accumulatedContent.length) {
+                      } else {
+                        // Chunk mới cần append
                         accumulatedContent += data.content;
                         console.log('[Chat] Cộng dồn phần mới (từ', oldContent.length, '->', accumulatedContent.length, 'ký tự)');
-                      } else {
-                        accumulatedContent = data.content;
-                        console.log('[Chat] Thay thế nội dung (từ', oldContent.length, '->', accumulatedContent.length, 'ký tự)');
                       }
                       
                       setMessages(prev => prev.map(msg => 
@@ -607,6 +612,7 @@ const UserPanel = () => {
                       ));
                     }
                   } else if (data.role === 'Human') {
+                    // Human message từ server (có thể bỏ qua vì đã thêm trước khi gọi API)
                     console.log('[Chat] Nhận tin nhắn Human:', data.content);
                   } else {
                     console.log('[Chat] Event không xử lý:', JSON.stringify(data));
@@ -887,13 +893,11 @@ const UserPanel = () => {
                         ]}
                       >
                         <View style={tw`flex-row items-end`}>
-                          <Text
-                            style={tw`${
-                              message.sender === 'user' ? 'text-white' : 'text-gray-800'
-                            }`}
-                          >
-                            {message.text || (message.isStreaming ? '...' : '')}
-                          </Text>
+                          <ChatMessageText
+                            text={message.text || (message.isStreaming ? '...' : '')}
+                            isUser={message.sender === 'user'}
+                            isStreaming={message.isStreaming}
+                          />
                           {message.isStreaming && (
                             <View style={tw`ml-1 mb-1`}>
                               <ActivityIndicator size="small" color={message.sender === 'user' ? '#93c5fd' : '#6b7280'} />

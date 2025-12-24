@@ -19,6 +19,7 @@ import { Icon } from 'react-native-elements';
 import { useRoute } from '@react-navigation/native';
 import tw from 'tailwind-react-native-classnames';
 import ThemeText from '../ThemeText';
+import ChatMessageText from '../ChatMessageText/ChatMessageText';
 import { getAuthToken } from '../../utils/auth';
 import { getApiUrl, API_ENDPOINTS } from '../../config/api';
 
@@ -471,6 +472,7 @@ const FloatingChatBubble = () => {
                   } else if (data.role === 'Assistant' && data.content !== undefined) {
                     console.log('[FloatingChat] Nhận tin nhắn Assistant, isPartial:', data.isPartial, 'content length:', data.content.length);
                     if (data.isPartial === false) {
+                      // Message hoàn chỉnh cuối cùng - set toàn bộ nội dung
                       accumulatedContent = data.content;
                       setMessages((prev) => {
                         const updated = prev.map(msg => 
@@ -482,14 +484,17 @@ const FloatingChatBubble = () => {
                         return updated;
                       });
                     } else if (data.isPartial === true) {
-                      const oldContent = accumulatedContent;
+                      // Chunk trung gian (2-5 ký tự) - xử lý theo API mới
+                      // API mới: mỗi chunk partial có thể là:
+                      // 1. Chunk mới cần append (nếu content không chứa accumulatedContent)
+                      // 2. Toàn bộ nội dung hiện tại (nếu content chứa accumulatedContent)
                       if (data.content.length >= accumulatedContent.length && 
                           data.content.startsWith(accumulatedContent)) {
+                        // Chunk chứa toàn bộ nội dung hiện tại + phần mới
                         accumulatedContent = data.content;
-                      } else if (data.content.length < accumulatedContent.length) {
-                        accumulatedContent += data.content;
                       } else {
-                        accumulatedContent = data.content;
+                        // Chunk mới cần append
+                        accumulatedContent += data.content;
                       }
                       
                       setMessages((prev) => {
@@ -502,6 +507,9 @@ const FloatingChatBubble = () => {
                         return updated;
                       });
                     }
+                  } else if (data.role === 'Human') {
+                    // Human message từ server (có thể bỏ qua vì đã thêm trước khi gọi API)
+                    console.log('[FloatingChat] Nhận tin nhắn Human:', data.content);
                   }
                 } catch (e) {
                   console.error('[FloatingChat] Lỗi parse JSON:', e.message);
@@ -604,10 +612,11 @@ const FloatingChatBubble = () => {
             </View>
           ) : (
             <>
-              <ThemeText
-                style={tw`${isUser ? 'text-white' : 'text-gray-800'}`}>
-                {message.text || '...'}
-              </ThemeText>
+              <ChatMessageText
+                text={message.text || '...'}
+                isUser={isUser}
+                isStreaming={message.isStreaming}
+              />
               <ThemeText
                 style={[
                   tw`text-xs mt-1`,
